@@ -241,8 +241,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     if (semaKullan) {
       fs.writeFileSync(semaDosyasi, JSON.stringify(CIKTI_SEMASI));
       try {
-        ham = await komutCalistir(
-          'codex',
+        ham = await codexCalistir(
           [...argumanlar, '--output-schema', semaDosyasi, '-'],
           { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev }
         );

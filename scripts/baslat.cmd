@@ -3,8 +3,8 @@ rem Paneli (ve Telegram botunu) penceresiz baslatir.
 rem Gorev Zamanlayici bu dosyayi cagirir - komut satirini dogrudan gorev
 rem tanimina gomsek ic ice tirnaklar bozuluyor.
 cd /d "%~dp0.."
-set "PORT=4173"
-if not "%VOKU_PORT%"=="" set "PORT=%VOKU_PORT%"
+set "VPORT=4173"
+if not "%VOKU_PORT%"=="" set "VPORT=%VOKU_PORT%"
 set "PATH=%PATH%;%ProgramFiles%\nodejs;%LOCALAPPDATA%\Programs\nodejs;%ProgramFiles%\Git\cmd"
 if not exist logs mkdir logs
 
@@ -14,4 +14,4 @@ if exist config\guncelleme.json (
   if not errorlevel 1 node src\cli.js guncelle >> logs\guncelleme.log 2>&1
 )
 
-node src\cli.js panel --port %PORT% >> logs\panel.out 2>&1
+node src\cli.js panel --port %VPORT% >> logs\panel.out 2>&1

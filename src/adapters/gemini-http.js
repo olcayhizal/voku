@@ -37,6 +37,20 @@ function taban(platform) {
   return (platform?.baseUrl || 'http://127.0.0.1:4981').replace(/\/+$/, '');
 }
 
+/**
+ * Köprünün dinleyeceği port. Upstream'in `.env.example`'ı panelinkiyle aynı
+ * portu (4173) öneriyor; taze bir kurulumda köprü paneli ezmeye çalışıp
+ * "bind: address already in use" ile ölüyordu. Port artık tek kaynaktan —
+ * `settings.json > platforms.gemini.baseUrl` — türetilir.
+ */
+function portu(platform) {
+  try {
+    return new URL(taban(platform)).port || '4981';
+  } catch {
+    return '4981';
+  }
+}
+
 async function saglikli(platform, timeoutMs = 2500) {
   try {
     const yanit = await fetch(`${taban(platform)}/health`, {
@@ -64,7 +78,9 @@ async function servisiBaslat(platform) {
   log.info('[gemini-http] köprü servisi başlatılıyor');
   servisSureci = spawn(SERVIS_BINARY, [], {
     cwd: SERVIS_DIZINI,
-    env: process.env,
+    // PORT env ile veriliyor: .env'de ne yazarsa yazsın köprü doğru portta
+    // kalkar (eski kurulumlarda .env panelin portunu taşıyor olabilir).
+    env: { ...process.env, PORT: portu(platform) },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
@@ -88,7 +104,7 @@ async function servisiBaslat(platform) {
  * Gemini tarayıcı profilindeki oturum çerezlerini köprünün .env'ine yazar.
  * Panel "Giriş yap" akışını tamamladığında çağrılır.
  */
-export async function cerezleriSenkronla(cerezler) {
+export async function cerezleriSenkronla(cerezler, platform) {
   const bul = (isim) => cerezler.find((c) => c.name === isim)?.value || null;
   const psid = bul('__Secure-1PSID');
   const psidts = bul('__Secure-1PSIDTS');
@@ -101,9 +117,14 @@ export async function cerezleriSenkronla(cerezler) {
   let icerik = fs.existsSync(ENV_DOSYASI)
     ? fs.readFileSync(ENV_DOSYASI, 'utf8')
     : fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
+  const port = portu(platform);
   icerik = icerik
     .replace(/^GEMINI_1PSID=.*$/m, `GEMINI_1PSID=${psid}`)
     .replace(/^GEMINI_1PSIDTS=.*$/m, `GEMINI_1PSIDTS=${psidts}`);
+  // Örnek dosyadan gelen PORT paneli eziyor; doğrusuyla değiştirilir.
+  icerik = /^PORT=/m.test(icerik)
+    ? icerik.replace(/^PORT=.*$/m, `PORT=${port}`)
+    : `PORT=${port}\n${icerik}`;
   fs.writeFileSync(ENV_DOSYASI, icerik);
   log.ok('[gemini-http] çerezler köprüye yazıldı');
 

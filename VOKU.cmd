@@ -12,8 +12,8 @@ rem  menu metinleri sade (aksansiz) yazildi - bozuk gorunmesindense duz.
 
 cd /d "%~dp0"
 set "KOK=%CD%"
-set "PORT=4173"
-if not "%VOKU_PORT%"=="" set "PORT=%VOKU_PORT%"
+set "VPORT=4173"
+if not "%VOKU_PORT%"=="" set "VPORT=%VOKU_PORT%"
 if not exist logs mkdir logs
 
 rem Node kurulumu PATH'e her zaman yansimayabilir; olagan yerleri ekle.
@@ -93,11 +93,11 @@ set "ACILISTA=acik"
 set "LINK="
 set "GUNCELLEME="
 
-netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
+netstat -ano | findstr /r /c:":%VPORT% .*LISTENING" >nul 2>&1
 if not errorlevel 1 set "PANEL=calisiyor"
 
 if "%PANEL%"=="calisiyor" (
-  for /f "delims=" %%A in ('curl -s --max-time 3 "http://127.0.0.1:%PORT%/api/state" 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const k=j.joblar.filter(x=>x.kosuyor||x.status==='running').length;const b=j.joblar.filter(x=>x.status==='pending').length;const t=j.telegram||{};console.log((t.acik?'dinliyor @'+(t.bot?t.bot.username:'-'):'kapali')+';'+j.joblar.length+' is, '+k+' calisiyor, '+b+' bekliyor')}catch{console.log('kapali;')}})" 2^>nul') do (
+  for /f "delims=" %%A in ('curl -s --max-time 3 "http://127.0.0.1:%VPORT%/api/state" 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const k=j.joblar.filter(x=>x.kosuyor||x.status==='running').length;const b=j.joblar.filter(x=>x.status==='pending').length;const t=j.telegram||{};console.log((t.acik?'dinliyor @'+(t.bot?t.bot.username:'-'):'kapali')+';'+j.joblar.length+' is, '+k+' calisiyor, '+b+' bekliyor')}catch{console.log('kapali;')}})" 2^>nul') do (
     for /f "tokens=1,2 delims=;" %%B in ("%%A") do (
       set "TELEGRAM=%%B"
       set "KUYRUK=%%C"
@@ -128,7 +128,7 @@ echo.
 echo   VOKU  - karanlik oda
 echo   --------------------------------------------------
 if "%PANEL%"=="calisiyor" (
-  echo   [+] Panel      calisiyor    http://127.0.0.1:%PORT%
+  echo   [+] Panel      calisiyor    http://127.0.0.1:%VPORT%
 ) else (
   echo   [ ] Panel      kapali
 )
@@ -175,9 +175,9 @@ if "!DOMAIN!"=="" (
   for /f "delims=" %%D in ('node src\cli.js tunel 2^>nul') do set "DOMAIN=%%D"
 )
 if "!DOMAIN!"=="" (
-  start "" /b cmd /c "ngrok http %PORT% --log=stdout >> logs\ngrok.log 2>&1"
+  start "" /b cmd /c "ngrok http %VPORT% --log=stdout >> logs\ngrok.log 2>&1"
 ) else (
-  start "" /b cmd /c "ngrok http %PORT% --url=!DOMAIN! --log=stdout >> logs\ngrok.log 2>&1"
+  start "" /b cmd /c "ngrok http %VPORT% --url=!DOMAIN! --log=stdout >> logs\ngrok.log 2>&1"
 )
 
 call :adres_bekle
@@ -186,7 +186,7 @@ if not "!ADRES!"=="" goto :tunel_kaydet
 rem Kayitli adres hesapta yoksa ngrok acilmaz; serbest adresle dene.
 if not "!DOMAIN!"=="" (
   taskkill /f /im ngrok.exe >nul 2>&1
-  start "" /b cmd /c "ngrok http %PORT% --log=stdout >> logs\ngrok.log 2>&1"
+  start "" /b cmd /c "ngrok http %VPORT% --log=stdout >> logs\ngrok.log 2>&1"
   call :adres_bekle
 )
 if "!ADRES!"=="" exit /b 1
@@ -207,7 +207,7 @@ exit /b
 
 rem ------------------------------------------------------- panel baslatma
 :panel_baslat
-netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
+netstat -ano | findstr /r /c:":%VPORT% .*LISTENING" >nul 2>&1
 if not errorlevel 1 exit /b 0
 echo   Panel baslatiliyor...
 rem Otomatik guncelleme aciksa once yeni surumu cek.
@@ -221,7 +221,7 @@ if exist config\guncelleme.json (
 start "" /b cmd /c "scripts\baslat.cmd"
 for /l %%i in (1,1,30) do (
   timeout /t 1 /nobreak >nul
-  netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
+  netstat -ano | findstr /r /c:":%VPORT% .*LISTENING" >nul 2>&1
   if not errorlevel 1 exit /b 0
 )
 echo   Panel acilamadi. logs\panel.out dosyasina bak.
@@ -231,7 +231,7 @@ exit /b 1
 rem --------------------------------------------------------------- islemler
 :panele_git
 call :panel_baslat || goto menu
-start "" "http://127.0.0.1:%PORT%"
+start "" "http://127.0.0.1:%VPORT%"
 goto menu
 
 :disariya_ac
@@ -311,7 +311,7 @@ set "c="
 set /p "c=  Panel, Telegram botu ve dis erisim kapatilsin mi? (e/h): "
 if /i not "%c%"=="e" goto menu
 taskkill /f /im ngrok.exe >nul 2>&1
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING"') do taskkill /f /pid %%P >nul 2>&1
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%VPORT% .*LISTENING"') do taskkill /f /pid %%P >nul 2>&1
 echo   Kapatildi. Suren isler varsa panel acilinca kaldigi yerden devam eder.
 timeout /t 2 /nobreak >nul
 goto menu
@@ -347,7 +347,7 @@ set /p "c=  Simdi guncellensin mi? (e/h): "
 if /i not "%c%"=="e" goto menu
 echo.
 echo   Panel kapatiliyor...
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING"') do taskkill /f /pid %%P >nul 2>&1
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%VPORT% .*LISTENING"') do taskkill /f /pid %%P >nul 2>&1
 call node src\cli.js guncelle
 echo.
 echo   Panel yeniden baslatiliyor...
@@ -401,7 +401,7 @@ goto menu
 :cikis
 cls
 echo.
-netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
+netstat -ano | findstr /r /c:":%VPORT% .*LISTENING" >nul 2>&1
 if not errorlevel 1 (
   echo   Panel arka planda calismaya devam ediyor.
 ) else (
