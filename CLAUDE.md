@@ -221,14 +221,36 @@ Değiştirmek için `config/settings.json > channel` (platform bazında
 - Sunucu yalnız `127.0.0.1`'e bağlanır. Bir tünelin arkasına konursa erişim
   denetimi devreye girer (aşağıya bak).
 
-## VOKU.command — çift tıklanan kontrol paneli
+## Kurulum, güncelleme ve platformlar
+- **Depo:** github.com/olcayhizal/voku (public). Kişisel her şey depo dışıdır:
+  `config/prompts.json`, `telegram.json`, `erisim.json`, `jobs/`, `sayfalar/`,
+  `output/`, `.profiles/`, `tools/`. Örnek yapılandırmalar `*.example.json`.
+- **Windows kurulumu:** `install.cmd` — winget ile Git + Node.js, repo klonu,
+  `npm install`, örnek config kopyaları, masaüstü kısayolu.
+- **Güncelleme** (`src/guncelleme.js`, `cli guncelle`): `git pull --ff-only`.
+  Yerel commit ya da kirli çalışma ağacı varsa **güncelleme yapılmaz** —
+  kullanıcının kurulumunu sessizce ezmek en kötü senaryodur. `package-lock`
+  değiştiyse bağımlılıklar yenilenir. Kontrol sonucu 6 saat önbelleklenir
+  (`.guncelleme-durumu.json`), betikler `var|adet|mesaj` satırını okur.
+  Otomatik güncelleme `config/guncelleme.json > otomatik` ile açılır; açıksa
+  panel her başlatılışta önce güncellenir.
+- **Platform farkları `src/platform.js`'te toplanır** — `open`/`explorer`,
+  `python3`/`python`/`py`, binary `.exe` uzantısı. Adapter'lara platform
+  koşulu yazılmaz.
+- Windows'ta ChatGPT motoru için Codex CLI native kurulum (OpenAI'ın
+  "deneysel" etiketi duruyor) ya da WSL2 gerekir; Gemini köprüsü Go ile
+  yeniden derlenmeli. Panel, Telegram botu, misafir erişimi platformdan
+  bağımsızdır.
+
+## VOKU.command / VOKU.cmd — çift tıklanan kontrol paneli
 Terminal bilmeyen biri için tek giriş noktası: Finder'dan çift tıkla, menü
 gelsin. Masaüstündeki kısayoldan da açılır (script symlink zincirini çözüp
 proje klasörüne geçer — `dirname "$0"` kısayolda masaüstünü gösterir).
 
-Menü: paneli tarayıcıda aç · dışarıya aç (tünel + misafir bağlantısını
-panoya kopyala) · dış erişimi kapat · bağlantıyı yenile · her şeyi kapat ·
-bilgisayar açılınca kendiliğinden başlat.
+macOS'ta `VOKU.command` (bash), Windows'ta `VOKU.cmd` (batch) — aynı menü:
+paneli tarayıcıda aç · dışarıya aç (tünel + misafir bağlantısını panoya
+kopyala) · dış erişimi kapat · bağlantıyı yenile · her şeyi kapat ·
+güncelle · otomatik güncelleme · açılışta kendiliğinden başlat.
 
 - Üstte canlı durum: panel / Telegram / dış erişim lambaları + kuyruk özeti
   (`/api/state`'ten `node` ile okunur — jq bağımlılığı yok).
@@ -236,8 +258,10 @@ bilgisayar açılınca kendiliğinden başlat.
   Telegram botu yarıda kalmasın.
 - Çift tıkla açılan kabukta Homebrew/nvm PATH'te olmayabilir — script
   `/opt/homebrew/bin`, `/usr/local/bin` ve nvm yolunu kendisi ekler.
-- Otomatik başlatma `~/Library/LaunchAgents/io.voku.panel.plist`
-  (`RunAtLoad` + `KeepAlive`); aynı seçenek kaldırır da.
+- Otomatik başlatma: macOS'ta `~/Library/LaunchAgents/io.voku.panel.plist`
+  (`RunAtLoad` + `KeepAlive`), Windows'ta Görev Zamanlayıcı ("VOKU Panel",
+  onlogon) — komutu göreve gömmek yerine `scripts/baslat.cmd` çağrılır,
+  iç içe tırnaklar bozuluyordu.
 - Eksik bağımlılıkta teknik çıktı basmaz: Node yoksa nodejs.org'a, ngrok
   yoksa (brew varsa) kurulumu teklif etmeye, authtoken yoksa
   `ngrok config add-authtoken` adımına yönlendirir.

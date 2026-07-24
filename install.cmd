@@ -116,9 +116,7 @@ if not exist config\prompts.json (
 )
 
 rem Masaustune kisayol (PowerShell ile .lnk)
-powershell -NoProfile -Command ^
-  "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\VOKU.lnk');" ^
-  "$s.TargetPath='%HEDEF%\VOKU.cmd'; $s.WorkingDirectory='%HEDEF%'; $s.IconLocation='%SystemRoot%\System32\imageres.dll,109'; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'VOKU.lnk')); $s.TargetPath=$env:HEDEF + '\VOKU.cmd'; $s.WorkingDirectory=$env:HEDEF; $s.Save()" >nul 2>&1
 
 popd
 

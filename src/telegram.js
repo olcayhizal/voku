@@ -128,6 +128,12 @@ export function telegramAyarlariniYukle() {
   }
   const s = { ...VARSAYILAN, ...ham };
   if (process.env.VOKU_TELEGRAM_TOKEN) s.token = process.env.VOKU_TELEGRAM_TOKEN;
+  // Örnek dosyadan kopyalanmış ama doldurulmamış token'ı gerçek sanma:
+  // yeni kurulumda "Not Found" yerine ne yapılacağını söyleyen uyarı çıksın.
+  if (s.token && /^(BOTFATHER_TOKEN|<.*>|degistir|token)$/i.test(String(s.token).trim())) {
+    s.token = null;
+    s.tokenDoldurulmadi = true;
+  }
   s.izinliChatler = (s.izinliChatler || []).map(Number).filter(Number.isFinite);
   return s;
 }
@@ -192,7 +198,9 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
     return { durum: () => ({ ...durum, ayar: kamuAyar() }), durdur: () => {} };
   }
   if (!tg.token) {
-    durum.hata = 'Token yok — config/telegram.json içine token yaz veya VOKU_TELEGRAM_TOKEN ver.';
+    durum.hata = tg.tokenDoldurulmadi
+      ? 'Bot token\'ı doldurulmamış: config/telegram.json içindeki "token" alanına BotFather\'dan aldığın anahtarı yaz.'
+      : 'Token yok — config/telegram.json içine token yaz veya VOKU_TELEGRAM_TOKEN ver.';
     log.warn(`Telegram: ${durum.hata}`);
     return { durum: () => ({ ...durum, ayar: kamuAyar() }), durdur: () => {} };
   }
@@ -723,9 +731,14 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
       await dongu();
     } catch (e) {
       durum.acik = false;
-      durum.hata = e.message;
+      // Telegram 401/404'ü "Unauthorized"/"Not Found" diye döner; kullanan
+      // kişi için bu, token'ın yanlış olduğu anlamına gelir.
+      durum.hata =
+        e.kod === 401 || e.kod === 404
+          ? 'Bot token\'ı geçersiz — config/telegram.json içindeki "token" alanını kontrol et.'
+          : e.message;
       durumDegisti();
-      log.err(`Telegram botu başlatılamadı: ${e.message}`);
+      log.err(`Telegram botu başlatılamadı: ${durum.hata}`);
       // Token reddedildiyse ısrar anlamsız; ağ/geçici hatada dinlemeyi dene.
       if (e.kod !== 401 && e.kod !== 404) await dongu();
     }

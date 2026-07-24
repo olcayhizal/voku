@@ -134,7 +134,7 @@ if exist config\guncelleme.json (
     call node src\cli.js guncelle >> logs\guncelleme.log 2>&1
   )
 )
-start "" /b cmd /c "node src\cli.js panel --port %PORT% >> logs\panel.out 2>&1"
+start "" /b cmd /c "scripts\baslat.cmd"
 for /l %%i in (1,1,30) do (
   timeout /t 1 /nobreak >nul
   netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
@@ -201,7 +201,7 @@ if "!ADRES!"=="" (
 
 for /f "delims=" %%A in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2^>nul') do set "ANAHTAR=%%A"
 set "LINK=!ADRES!/?anahtar=!ANAHTAR!"
-echo !LINK!| clip
+<nul set /p "=!LINK!" | clip
 
 cls
 echo.
@@ -297,7 +297,7 @@ if "%OTO%"=="acik" (
   timeout /t 2 /nobreak >nul
   goto menu
 )
-schtasks /create /tn "VOKU Panel" /tr "cmd /c cd /d \"%KOK%\" && node src\cli.js panel --port %PORT% >> logs\panel.out 2>&1" /sc onlogon /rl limited /f >nul 2>&1
+schtasks /create /tn "VOKU Panel" /tr "\"%KOK%\scripts\baslat.cmd\"" /sc onlogon /rl limited /f >nul 2>&1
 if errorlevel 1 (
   echo   Gorev olusturulamadi. Bu dosyayi yonetici olarak calistirmayi dene.
   pause
