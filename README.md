@@ -68,3 +68,5 @@ Bu araç kişisel bir üretim hattıdır; hesap oturumlarınla çalışır, API
 anahtarı kullanmaz. Gemini köprüsü ve watermark temizleyicisi üçüncü taraf
 projelerdir ve ilgili servislerin kullanım koşulları açısından gri alandadır
 — ticari kullanımdan önce bunu değerlendir.
+
+<!-- surum: 0.1.1 -->
