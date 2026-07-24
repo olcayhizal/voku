@@ -361,13 +361,20 @@ async function main() {
         else console.log('yok|0|');
         return;
       }
-      const sonuc = await g.guncelle();
-      if (!sonuc.degisti) log.info('Zaten güncel.');
-      else
-        log.ok(
-          `Güncellendi: ${sonuc.once} → ${sonuc.sonra}` +
-            (sonuc.bagimlilik ? ' (bağımlılıklar da yenilendi)' : '')
-        );
+      // Hata yığını basmak yerine tek satır: bu komutu çoğunlukla kontrol
+      // panelinden, terminal bilmeyen biri tetikliyor.
+      try {
+        const sonuc = await g.guncelle();
+        if (!sonuc.degisti) log.info('Zaten güncel.');
+        else
+          log.ok(
+            `Güncellendi: ${sonuc.once} → ${sonuc.sonra}` +
+              (sonuc.bagimlilik ? ' (bağımlılıklar da yenilendi)' : '')
+          );
+      } catch (e) {
+        log.err(String(e?.message || e));
+        process.exitCode = 1;
+      }
       return;
     }
     case 'baglanti': {

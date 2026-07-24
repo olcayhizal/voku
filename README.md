@@ -14,13 +14,14 @@ prompt için görsel üreten **job tabanlı** üretim hattı.
 
 ## Kurulum
 
-**Windows:** `install.cmd` dosyasını çift tıkla — Git, Node.js ve projeyi
-kurar, masaüstüne kısayol koyar.
+**Windows:** [install.cmd](https://raw.githubusercontent.com/olcayhizal/voku/main/install.cmd)
+dosyasını indir ve çift tıkla — Git ve Node.js yoksa kurar, projeyi çeker,
+bağımlılıkları yükler, masaüstüne kısayol koyar. Başka bir şey gerekmez.
 
 **macOS:**
 
 ```bash
-git clone <repo-adresi> ~/voku && cd ~/voku
+git clone https://github.com/olcayhizal/voku.git ~/voku && cd ~/voku
 npm install
 npm i -g @openai/codex     # ChatGPT motoru
 ```
