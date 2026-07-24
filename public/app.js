@@ -617,7 +617,11 @@ function jobDetayCiz() {
         el('span', {
           text:
             t.status === 'done' && !dosyaHazirMi(t)
-              ? `${secili.etiket.toLocaleLowerCase('tr')} hazırlanıyor`
+              // Demo/baskı üretimden sonra basılır (bir an gecikebilir); ham
+              // üretimde ise ara durum yoktur — dosya yoksa gelmeyecek demektir.
+              ? dosyaVaryanti === 'uretim'
+                ? 'dosya bulunamadı — yenile'
+                : `${secili.etiket.toLocaleLowerCase('tr')} hazırlanıyor`
               : `${DURUM_ETIKET[t.status]}${t.attempts > 1 ? ` · ${t.attempts}. deneme` : ''}`,
         }),
         state.varyant === 'baski' && t.status === 'done' && dosyaHazirMi(t)

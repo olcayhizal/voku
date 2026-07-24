@@ -47,6 +47,12 @@ artırılırken bu akılda tutulur.
 Codex bir **ajan**, düz görsel API'si değil: her istekte düşünme turları,
 tool seçimi, dosya yazma ve doğrulama var. Süre buradan geliyor.
 
+*Çıktı iş klasörüne alınır.* Codex mutlak yol döndürüp görseli kendi
+çalışma/geçici klasörüne yazabiliyor (Windows'un AppContainer sandbox'ında
+sık). Task yalnız dosya ADINI saklar ve panel onu job klasöründe arar; dışarıda
+kalan çıktı "task done ama kare boş, üretim hazırlanıyor" durumuna yol açıyordu.
+Adapter artık `outDir` dışındaki her çıktıyı içeri kopyalar.
+
 *İki tuzak (ikisi de ölçülerek bulundu):*
 - **Prompt STDIN'den verilir** (`-` argümanı + stdin). Pozisyonel argüman
   olarak verilirse ve komutta `-c` varsa, `-i` çoklu değer aldığı için

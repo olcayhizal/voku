@@ -298,10 +298,25 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     });
   }
 
-  const dosyalar = [...yollar].filter((y) => fs.existsSync(y) && fs.statSync(y).size > 1024);
-  if (!dosyalar.length) {
+  const gecerli = [...yollar].filter((y) => fs.existsSync(y) && fs.statSync(y).size > 1024);
+  if (!gecerli.length) {
     const kuyruk = ham.trim().split('\n').slice(-3).join(' ').slice(0, 300);
     throw new Error(`Codex görsel üretmedi. Son çıktı: ${kuyruk || '(boş)'}`);
   }
+
+  // Codex mutlak yol döndürüp dosyayı kendi çalışma/geçici klasörüne yazmış
+  // olabilir (Windows'un AppContainer sandbox'ında sık). Task yalnız dosya
+  // ADINI saklar ve panel onu job klasöründe arar: dışarıda kalan çıktı
+  // "üretildi ama görünmüyor" durumuna yol açar. Bu yüzden outDir dışındaki
+  // her çıktı içeri kopyalanır.
+  const dosyalar = gecerli.map((kaynak, i) => {
+    if (path.resolve(path.dirname(kaynak)) === path.resolve(outDir)) return kaynak;
+    const ek = gecerli.length > 1 ? `-${i + 1}` : '';
+    const varis = path.join(outDir, `${baseName}${ek}${path.extname(kaynak) || '.png'}`);
+    fs.copyFileSync(kaynak, varis);
+    log.info(`[chatgpt-codex] çıktı iş klasörüne alındı: ${path.basename(varis)}`);
+    return varis;
+  });
+
   return dosyalar.map((y) => path.basename(y));
 }
