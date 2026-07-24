@@ -86,7 +86,7 @@ guncelleme_satiri() {
     }).catch(() => console.log('yok|0'));
   " 2>/dev/null)"
   case "$d" in
-    var\|*) yaz "  ${AMBER}↑${SIFIR} Yeni sürüm var ${SOLUK}(${d#var|} güncelleme) — 7 ile kur${SIFIR}" ;;
+    var\|*) yaz "  ${AMBER}↑${SIFIR} Yeni sürüm var ${SOLUK}(${d#var|} güncelleme) — 6 ile kur${SIFIR}" ;;
   esac
 }
 
@@ -138,8 +138,8 @@ durum_ekrani() {
   yaz "  ${AMBER}3${SIFIR}  Dış erişimi kapat"
   yaz "  ${AMBER}4${SIFIR}  Bağlantıyı yenile ${SOLUK}(eski bağlantı geçersiz olur)${SIFIR}"
   yaz "  ${AMBER}5${SIFIR}  Her şeyi kapat"
-  yaz "  ${AMBER}6${SIFIR}  Bilgisayar açılınca kendiliğinden başlasın   ${SOLUK}[$(otomatik_mi)]${SIFIR}"
-  yaz "  ${AMBER}7${SIFIR}  Güncelle ${SOLUK}(GitHub'daki yeni sürümü çek)${SIFIR}"
+  yaz "  ${AMBER}6${SIFIR}  Güncelle ${SOLUK}(GitHub'daki yeni sürümü çek)${SIFIR}"
+  yaz "  ${AMBER}7${SIFIR}  Bilgisayar açılınca kendiliğinden başlasın   ${SOLUK}[$(otomatik_mi)]${SIFIR}"
   yaz "  ${AMBER}8${SIFIR}  Otomatik güncelleme                         ${SOLUK}[$(otomatik_guncelleme_mi)]${SIFIR}"
   yaz "  ${AMBER}9${SIFIR}  Açılışta panel + dış erişim                 ${SOLUK}[$(acilista_etiket)]${SIFIR}"
   yaz "  ${AMBER}0${SIFIR}  Çık ${SOLUK}(panel arka planda çalışmaya devam eder)${SIFIR}"
@@ -478,8 +478,8 @@ while true; do
     3) disariyi_kapat ;;
     4) baglantiyi_yenile ;;
     5) hepsini_kapat ;;
-    6) otomatik_baslat ;;
-    7) guncelleme_yap ;;
+    6) guncelleme_yap ;;
+    7) otomatik_baslat ;;
     8) otomatik_guncelleme_degistir ;;
     9) acilista_degistir ;;
     0|q|Q)
