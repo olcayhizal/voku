@@ -1,0 +1,48 @@
+{
+  "headless": false,
+  "slowMo": 0,
+  "channel": "chrome",
+  "maxAttempts": 3,
+  "retryBackoffMs": 5000,
+  "generationTimeoutMs": 420000,
+  "navigationTimeoutMs": 60000,
+  "parallelPlatforms": true,
+  "concurrency": 3,
+  "platforms": {
+    "chatgpt": {
+      "adapter": "chatgpt-codex",
+      "url": "https://chatgpt.com/",
+      "profileDir": ".profiles/chatgpt",
+      "enabled": true,
+      "concurrency": 4,
+      "codexConfig": {
+        "model_reasoning_effort": "low"
+      }
+    },
+    "gemini": {
+      "adapter": "gemini-http",
+      "url": "https://gemini.google.com/app",
+      "profileDir": ".profiles/gemini",
+      "baseUrl": "http://127.0.0.1:4981",
+      "model": "gemini-3-pro-image",
+      "enabled": true,
+      "concurrency": 4,
+      "watermarkKaldir": true
+    }
+  },
+  "selectors": {
+    "chatgpt": {
+      "composer": "#prompt-textarea",
+      "fileInput": "input[type=file]",
+      "sendButton": "[data-testid=\"send-button\"]",
+      "stopButton": "[data-testid=\"stop-button\"]",
+      "resultImage": "main img[src*=\"oaiusercontent\"], main img[alt*=\"Generated\"], main img[alt*=\"Oluşturulan\"]"
+    },
+    "gemini": {
+      "composer": "div.ql-editor[contenteditable=\"true\"], rich-textarea div[contenteditable=\"true\"]",
+      "fileInput": "input[type=file]",
+      "sendButton": "button[aria-label*=\"Gönder\"], button[aria-label*=\"Send\"], button.send-button",
+      "resultImage": "generated-image img, img.image-item, model-response img[src^=\"blob:\"], model-response img[src^=\"https\"]"
+    }
+  }
+}

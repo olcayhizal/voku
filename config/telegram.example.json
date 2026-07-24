@@ -1,0 +1,18 @@
+{
+  "_": "config/telegram.json olarak kopyala, token'ı doldur. Gerçek dosya git'e girmez.",
+  "enabled": true,
+  "token": "BOTFATHER_TOKEN",
+  "_izinliChatler": "boş liste = herkes iş açabilir; dolu liste = yalnız bu chat id'ler (/id komutu söyler)",
+  "izinliChatler": [],
+  "_toplamaMs": "fotoğraftan sonra telefon/isim beklenen süre",
+  "toplamaMs": 20000,
+  "metinSonrasiMs": 3000,
+  "bilgiOmruMs": 300000,
+  "demoGonder": true,
+  "_varsayilanVaryant": "mesajda \"demo\" geçmezse bu varyant gönderilir (uretim = damgasız)",
+  "varsayilanVaryant": "uretim",
+  "demoAnahtari": "demo",
+  "_belgeOlarak": "true → sıkıştırmasız belge olarak gönderir, albüm önizlemesi olmaz",
+  "belgeOlarak": false,
+  "gonderimUzunKenar": 2000
+}

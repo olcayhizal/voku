@@ -1,0 +1,106 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { ROOT, CONFIG_DIR } from './paths.js';
+
+const VARSAYILAN = {
+  headless: false,
+  slowMo: 0,
+  maxAttempts: 3,
+  retryBackoffMs: 5000,
+  generationTimeoutMs: 240000,
+  navigationTimeoutMs: 60000,
+  parallelPlatforms: true,
+  platforms: {},
+  selectors: {},
+};
+
+export function ayarlariYukle(dosya) {
+  const p = dosya ? path.resolve(dosya) : path.join(CONFIG_DIR, 'settings.json');
+  if (!fs.existsSync(p)) throw new Error(`Ayar dosyası yok: ${p}`);
+  const ham = JSON.parse(fs.readFileSync(p, 'utf8'));
+  const s = { ...VARSAYILAN, ...ham };
+  // Profil yolları köke göre mutlaklaştırılır. Tarayıcısız sürücülerde
+  // (Codex) profileDir olmayabilir — o platformda tarayıcı hiç açılmaz.
+  for (const [ad, plt] of Object.entries(s.platforms)) {
+    plt.ad = ad;
+    if (plt.profileDir) {
+      plt.profileDir = path.isAbsolute(plt.profileDir)
+        ? plt.profileDir
+        : path.join(ROOT, plt.profileDir);
+    }
+  }
+  return s;
+}
+
+/**
+ * Prompt listesini yükler ve doğrular.
+ * Kabul edilen biçim: { prompts: [...] } veya doğrudan [...]
+ * Her kayıt: { id, platform, prompt, count? }
+ */
+export function promptDosyaYolu(dosya) {
+  return dosya ? path.resolve(dosya) : path.join(CONFIG_DIR, 'prompts.json');
+}
+
+export function promptlariYukle(dosya, ayarlar) {
+  const p = promptDosyaYolu(dosya);
+  if (!fs.existsSync(p)) throw new Error(`Prompt dosyası yok: ${p}`);
+  const ham = JSON.parse(fs.readFileSync(p, 'utf8'));
+  const liste = Array.isArray(ham) ? ham : ham.prompts;
+  return promptlariDogrula(liste, ayarlar, p);
+}
+
+/** Ham prompt listesini doğrular, normalize eder. Panel kaydetmeden önce de çağırır. */
+export function promptlariDogrula(liste, ayarlar, kaynak = 'prompt listesi') {
+  if (!Array.isArray(liste) || liste.length === 0) {
+    throw new Error(`Prompt listesi boş: ${kaynak}`);
+  }
+
+  const gorulen = new Set();
+  const bilinen = Object.keys(ayarlar?.platforms || {});
+
+  // Eski listelerde platform yerine sürücü adı yazılmış olabilir
+  // (ör. "chatgpt-codex"). Sürücüyü kullanan platforma sessizce eşle.
+  const surucuEslemesi = {};
+  for (const [ad, plt] of Object.entries(ayarlar?.platforms || {})) {
+    if (plt.adapter && !bilinen.includes(plt.adapter)) surucuEslemesi[plt.adapter] = ad;
+  }
+
+  return liste.map((kayit, i) => {
+    const id = String(kayit.id ?? `p${String(i + 1).padStart(2, '0')}`);
+    if (gorulen.has(id)) throw new Error(`Tekrarlanan prompt id: ${id}`);
+    gorulen.add(id);
+
+    let platform = String(kayit.platform || '').toLowerCase();
+    if (!platform) throw new Error(`Prompt "${id}": platform boş.`);
+    if (bilinen.length && !bilinen.includes(platform)) {
+      if (surucuEslemesi[platform]) {
+        platform = surucuEslemesi[platform];
+      } else {
+        throw new Error(
+          `Prompt "${id}": bilinmeyen platform "${platform}". Tanımlı: ${bilinen.join(', ')}`
+        );
+      }
+    }
+    const prompt = String(kayit.prompt || '').trim();
+    if (!prompt) throw new Error(`Prompt "${id}": prompt metni boş.`);
+
+    const count = Number.isInteger(kayit.count) && kayit.count > 0 ? kayit.count : 1;
+    return { id, platform, prompt, count, sira: i + 1 };
+  });
+}
+
+/** Doğrulanmış listeyi prompts.json'a yazar (panel "Kaydet"). */
+export function promptlariKaydet(liste, ayarlar, dosya) {
+  const dogrulanmis = promptlariDogrula(liste, ayarlar);
+  const p = promptDosyaYolu(dosya);
+  const govde = {
+    prompts: dogrulanmis.map(({ id, platform, prompt, count }) => ({
+      id,
+      platform,
+      count,
+      prompt,
+    })),
+  };
+  fs.writeFileSync(p, JSON.stringify(govde, null, 2));
+  return dogrulanmis;
+}

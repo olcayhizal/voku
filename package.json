@@ -1,0 +1,24 @@
+{
+  "name": "voku",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fotoğraftan ChatGPT + Gemini web üyelikleri üzerinden job tabanlı görsel üretimi",
+  "bin": {
+    "voku": "src/cli.js"
+  },
+  "scripts": {
+    "voku": "node src/cli.js",
+    "login:chatgpt": "node src/cli.js login chatgpt",
+    "login:gemini": "node src/cli.js login gemini",
+    "run": "node src/cli.js run",
+    "panel": "node src/cli.js panel --open"
+  },
+  "dependencies": {
+    "playwright": "^1.61.1",
+    "sharp": "^0.35.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

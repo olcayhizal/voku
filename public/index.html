@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>voku — karanlık oda</title>
+<link rel="stylesheet" href="/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230E1216'/><circle cx='16' cy='16' r='6' fill='%23E8A13C'/></svg>" />
+</head>
+<body>
+
+<header class="bar">
+  <div class="mark">
+    <span class="lamp" aria-hidden="true"></span>
+    <span class="wordmark">voku</span>
+    <span class="tag">karanlık oda</span>
+    <span class="tag misafir-rozet gizli" id="misafirRozet">misafir görünümü</span>
+  </div>
+
+  <!-- Günlük akış solda (iş → baskı), kurulum ekranları sağda. -->
+  <nav class="tabs tabs-akis" role="tablist">
+    <button class="tab" role="tab" data-view="isler" aria-selected="true">İşler</button>
+    <button class="tab" role="tab" data-view="baski-odasi" aria-selected="false">
+      Baskı odası<span class="tab-rozet gizli" id="odaRozet">0</span>
+    </button>
+  </nav>
+
+  <nav class="tabs tabs-kurulum" role="tablist">
+    <button class="tab" role="tab" data-view="promptlar" aria-selected="false">Promptlar</button>
+    <button class="tab" role="tab" data-view="oturumlar" aria-selected="false">Oturumlar</button>
+  </nav>
+
+  <div class="oturum-lambalari" id="barLambalar"></div>
+</header>
+
+<main>
+  <!-- ================= İŞLER ================= -->
+  <section class="view" id="view-isler">
+    <div class="isler-duzen">
+
+      <aside class="kuyruk">
+        <div class="kuyruk-baslik">
+          <h2>Kuyruk</h2>
+          <button class="btn btn-ikincil btn-kucuk" id="yeniIsAc">Yeni iş</button>
+        </div>
+        <input
+          type="search"
+          class="kuyruk-ara gizli"
+          id="kuyrukAra"
+          placeholder="Ara — kod, telefon, not"
+          autocomplete="off"
+          aria-label="Kuyrukta ara"
+        />
+
+        <div class="segment segment-tarih durum-suzgec gizli" id="isSuzgec">
+          <button type="button" data-durum="tumu" aria-pressed="true" title="Tüm işler">Tümü</button>
+          <button type="button" data-durum="uretimde" aria-pressed="false" title="Üretimi süren işler">Üretimde</button>
+          <button type="button" data-durum="basiliyor" aria-pressed="false" title="Seçim var, baskı sürüyor">Basılıyor</button>
+          <button type="button" data-durum="basildi" aria-pressed="false" title="Seçilen tüm kopyalar basıldı">Basıldı</button>
+        </div>
+
+        <div class="segment segment-tarih durum-suzgec gizli" id="kaynakSuzgec">
+          <button type="button" data-kaynak="tumu" aria-pressed="true" title="Her kaynaktan iş">Tümü</button>
+          <button type="button" data-kaynak="panel" aria-pressed="false" title="Panelden yüklenen fotoğraflar">▣ Panel</button>
+          <button type="button" data-kaynak="telegram" aria-pressed="false" title="Telegram botundan gelen işler">✈ Telegram</button>
+        </div>
+
+        <div class="tarih-suzgec gizli" id="tarihSuzgec">
+          <div class="segment segment-tarih" id="tarihSegment">
+            <button type="button" data-tarih="tumu" aria-pressed="true">Tümü</button>
+            <button type="button" data-tarih="bugun" aria-pressed="false">Bugün</button>
+            <button type="button" data-tarih="dun" aria-pressed="false">Dün</button>
+            <button type="button" data-tarih="aralik" aria-pressed="false">Aralık</button>
+          </div>
+          <div class="tarih-aralik gizli" id="tarihAralik">
+            <label>
+              <span>başlangıç</span>
+              <input type="date" id="tarihBas" aria-label="Başlangıç tarihi" />
+            </label>
+            <label>
+              <span>bitiş</span>
+              <input type="date" id="tarihBit" aria-label="Bitiş tarihi" />
+            </label>
+          </div>
+        </div>
+        <div id="jobListesi" class="job-listesi"></div>
+      </aside>
+
+      <div class="tabaka" id="tabaka">
+        <div id="jobDetay"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PROMPTLAR ================= -->
+  <section class="view gizli" id="view-promptlar">
+    <div class="bolum-basi">
+      <div>
+        <h2>Prompt listesi</h2>
+        <p class="alt-metin">Her prompt bir üretim. Sıra, çıktı dosyalarının numarasını belirler.</p>
+      </div>
+      <div class="bolum-eylem">
+        <span class="sayac" id="promptDosyaAdi"></span>
+        <span class="kaydedilmedi gizli" id="promptRozet">Kaydedilmedi</span>
+        <button class="btn btn-ikincil" id="promptGeriAl">Geri al</button>
+        <button class="btn btn-birincil" id="promptKaydet">Kaydet</button>
+      </div>
+    </div>
+
+    <p class="uyari gizli" id="promptHata"></p>
+
+    <div id="promptListesi" class="prompt-listesi"></div>
+
+    <button class="btn btn-ekle" id="promptEkle">+ Prompt ekle</button>
+  </section>
+
+  <!-- ================= OTURUMLAR ================= -->
+  <section class="view gizli" id="view-oturumlar">
+    <div class="bolum-basi">
+      <div>
+        <h2>Oturumlar</h2>
+        <p class="alt-metin">
+          Üretim, senin ChatGPT ve Gemini üyeliklerin üzerinden yürür. Her platforma
+          bir kez giriş yap; oturum bu makinedeki tarayıcı profilinde kalır.
+        </p>
+      </div>
+    </div>
+    <div id="oturumKartlari" class="oturum-kartlari"></div>
+  </section>
+
+  <!-- ================= BASKI ODASI ================= -->
+  <section class="view gizli" id="view-baski-odasi">
+    <div class="isler-duzen">
+      <aside class="kuyruk">
+        <div class="kuyruk-baslik">
+          <h2>Sayfalar</h2>
+          <button class="btn btn-ikincil btn-kucuk" id="odaYenile">Yenile</button>
+        </div>
+        <input
+          type="search"
+          class="kuyruk-ara"
+          id="sayfaAra"
+          placeholder="Ara — sayfa, iş, müşteri"
+          autocomplete="off"
+          aria-label="Sayfalarda ara"
+        />
+        <div class="segment segment-tarih" id="sayfaSuzgec">
+          <button type="button" data-suzgec="tumu" aria-pressed="true">Tümü</button>
+          <button type="button" data-suzgec="bekliyor" aria-pressed="false">Bekliyor</button>
+          <button type="button" data-suzgec="basildi" aria-pressed="false">Basıldı</button>
+        </div>
+        <div id="sayfaListesi" class="job-listesi"></div>
+      </aside>
+
+      <div class="tabaka">
+        <div id="sayfaDetay"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ================= CANLI LOG ================= -->
+<footer class="log-serit kapali" id="logSerit">
+  <button class="log-basi" id="logAcKapa" aria-expanded="false">
+    <span class="log-nokta" aria-hidden="true"></span>
+    <span class="log-etiket">Canlı akış</span>
+    <span class="log-son mono" id="logSon">hat sessiz</span>
+    <span class="log-ok" aria-hidden="true">▲</span>
+  </button>
+  <div class="log-govde" id="logGovde"></div>
+</footer>
+
+<!-- ================= YENİ İŞ ================= -->
+<dialog id="yeniIsDialog" class="pencere">
+  <form method="dialog" class="pencere-govde" id="yeniIsForm">
+    <div class="pencere-basi">
+      <h2>Yeni iş</h2>
+      <button class="btn-kapat" value="iptal" aria-label="Kapat">×</button>
+    </div>
+
+    <label class="birak" id="birakAlani" for="fotoInput">
+      <input type="file" id="fotoInput" accept="image/*" hidden />
+      <div class="birak-ic" id="birakIc">
+        <span class="birak-baslik">Fotoğrafı buraya bırak</span>
+        <span class="alt-metin">veya tıkla, dosya seç — jpg, png, webp</span>
+      </div>
+    </label>
+
+    <div class="alan-ikili">
+      <label class="alan">
+        <span class="alan-etiket">Telefon numarası <em>isteğe bağlı</em></span>
+        <input type="tel" id="telefonInput" placeholder="0555 111 22 33" autocomplete="off" />
+        <span class="alan-ipucu">Boş bırakırsan iş kodu 000 ile başlar.</span>
+      </label>
+      <label class="alan">
+        <span class="alan-etiket">Not <em>isteğe bağlı</em></span>
+        <input type="text" id="notInput" placeholder="müşteri adı, kampanya…" autocomplete="off" />
+        <span class="alan-ipucu" id="uretimOzeti"></span>
+      </label>
+    </div>
+
+    <p class="uyari gizli" id="yeniIsHata"></p>
+
+    <div class="pencere-eylem">
+      <button class="btn btn-ikincil" value="iptal">Vazgeç</button>
+      <button class="btn btn-ikincil" id="sadeceOlustur" value="olustur">Kuyruğa ekle</button>
+      <button class="btn btn-birincil" id="olusturVeBaslat" value="baslat">Oluştur ve başlat</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ================= IŞIK KUTUSU (büyütülmüş kare) ================= -->
+<dialog id="isikKutusu" class="isik-kutusu">
+  <div class="isik-govde" id="isikGovde"></div>
+</dialog>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

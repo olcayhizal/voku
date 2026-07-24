@@ -1,0 +1,21 @@
+node_modules/
+.profiles/
+logs/
+output/
+*.tmp
+.DS_Store
+tools/
+.env
+config/telegram.json
+jobs/.telegram.lock
+assets/baski/*.orig
+sayfalar/*.etdx
+
+config/erisim.json
+
+# Kişisel çalışma verisi — public repoya girmez
+jobs/
+sayfalar/
+config/prompts.json
+config/guncelleme.json
+.guncelleme-durumu.json

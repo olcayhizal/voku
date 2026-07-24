@@ -1,0 +1,17 @@
+{
+  "_": "config/prompts.json olarak kopyala ve kendi promptlarınla doldur. Gerçek liste git'e girmez.",
+  "prompts": [
+    {
+      "id": "prompt-01",
+      "platform": "chatgpt",
+      "count": 1,
+      "prompt": "Buraya prompt metni. Örn: fotoğrafı sulu boya tarzına çevir; yüzler net kalsın. important: output aspect ratio 3:4"
+    },
+    {
+      "id": "prompt-02",
+      "platform": "gemini",
+      "count": 1,
+      "prompt": "İkinci prompt. platform alanı config/settings.json içindeki platform adlarından biri olmalı (chatgpt | gemini). count: aynı promptdan kaç üretim istendiği."
+    }
+  ]
+}
