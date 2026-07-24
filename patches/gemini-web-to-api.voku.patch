@@ -1,0 +1,28 @@
+diff --git a/internal/modules/openai/openai_service.go b/internal/modules/openai/openai_service.go
+index 95c38c4..8b0a64c 100644
+--- a/internal/modules/openai/openai_service.go
++++ b/internal/modules/openai/openai_service.go
+@@ -69,6 +69,10 @@ func (s *OpenAIService) CreateChatCompletion(ctx context.Context, req dto.ChatCo
+ 	if len(inputFiles) > 0 {
+ 		opts = append(opts, providers.WithInputFiles(inputFiles))
+ 	}
++	// [voku yaması] Chat yolunda da kimlik doğrulamalı indirme açılır: Google'ın
++	// döndürdüğü lh3 URL'leri oturum bağımlı (dışarıdan 403), b64 olmadan
++	// üretilen görsel alınamıyor.
++	opts = append(opts, providers.WithGeneratedImageDownload(true))
+ 
+ 	// Logic: Call Provider
+ 	response, err := s.client.GenerateContent(ctx, prompt, opts...)
+@@ -100,6 +104,12 @@ func (s *OpenAIService) CreateChatCompletion(ctx context.Context, req dto.ChatCo
+ 		if len(response.Images) > 0 {
+ 			var imgMarkdowns []string
+ 			for _, img := range response.Images {
++				// [voku yaması] İndirilmiş bayt varsa data URL göm — istemci
++				// oturumsuz olduğu için lh3 URL'ini indiremiyor.
++				if img.B64JSON != "" {
++					imgMarkdowns = append(imgMarkdowns, fmt.Sprintf("![image](data:image/png;base64,%s)", img.B64JSON))
++					continue
++				}
+ 				imgMarkdowns = append(imgMarkdowns, fmt.Sprintf("![image](%s)", img.URL))
+ 			}
+ 			if content != "" {

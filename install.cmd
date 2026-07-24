@@ -31,7 +31,7 @@ pause
 
 rem ------------------------------------------------------------ 1. Git
 echo.
-echo   [1/6] Git kontrol ediliyor...
+echo   [1/7] Git kontrol ediliyor...
 where git >nul 2>&1
 if errorlevel 1 (
   echo         Git kurulu degil, kuruluyor...
@@ -52,7 +52,7 @@ if errorlevel 1 (
 )
 
 rem ----------------------------------------------------------- 2. Node.js
-echo   [2/6] Node.js kontrol ediliyor...
+echo   [2/7] Node.js kontrol ediliyor...
 where node >nul 2>&1
 if errorlevel 1 (
   echo         Node.js kurulu degil, kuruluyor...
@@ -74,7 +74,7 @@ if errorlevel 1 (
 )
 
 rem -------------------------------------------------------------- 3. Proje
-echo   [3/6] Proje indiriliyor...
+echo   [3/7] Proje indiriliyor...
 if exist "%HEDEF%\.git" (
   echo         Zaten kurulu, guncelleniyor...
   pushd "%HEDEF%"
@@ -93,7 +93,7 @@ if exist "%HEDEF%\.git" (
 )
 
 rem -------------------------------------------------------- 4. Bagimliliklar
-echo   [4/6] Bagimliliklar kuruluyor ^(bu adim uzun surebilir^)...
+echo   [4/7] Bagimliliklar kuruluyor ^(bu adim uzun surebilir^)...
 pushd "%HEDEF%"
 if not exist logs mkdir logs
 call npm install --no-audit --no-fund >> logs\kurulum.log 2>&1
@@ -107,7 +107,7 @@ if errorlevel 1 (
 )
 
 rem ------------------------------------------------- 5. Yapilandirma + kisayol
-echo   [5/6] Yapilandirma hazirlaniyor...
+echo   [5/7] Yapilandirma hazirlaniyor...
 if not exist config\telegram.json (
   if exist config\telegram.example.json copy /y config\telegram.example.json config\telegram.json >nul
 )
@@ -116,7 +116,7 @@ if not exist config\prompts.json (
 )
 
 rem --------------------------------------------------- 6. ChatGPT motoru
-echo   [6/6] ChatGPT motoru ^(Codex CLI^) kuruluyor...
+echo   [6/7] ChatGPT motoru ^(Codex CLI^) kuruluyor...
 where codex >nul 2>&1
 if errorlevel 1 (
   call npm install -g @openai/codex >> logs\kurulum.log 2>&1
@@ -128,6 +128,14 @@ if errorlevel 1 (
   )
 ) else (
   echo         Zaten kurulu.
+)
+
+rem ------------------------------------------------- 7. Gemini motoru
+echo   [7/7] Gemini motoru ^(kopru + watermark^) kuruluyor...
+if exist tools\gemini-api-server.exe (
+  echo         Zaten kurulu.
+) else (
+  call scripts\motorlari-kur.cmd
 )
 
 rem Masaustune kisayol (PowerShell ile .lnk)
