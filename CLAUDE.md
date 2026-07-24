@@ -241,10 +241,17 @@ Değiştirmek için `config/settings.json > channel` (platform bazında
   "deneysel" etiketi duruyor) ya da WSL2 gerekir; Gemini köprüsü Go ile
   yeniden derlenmeli. Panel, Telegram botu, misafir erişimi platformdan
   bağımsızdır.
-- **`spawn` + Windows tuzağı:** npm'in global kurduğu programlar `codex.cmd`
-  gibi batch shim'leridir; Node `spawn` PATHEXT uygulamadığı için
-  `spawn('codex')` **ENOENT** verir. Bu yüzden dış komutlar
-  `platform.js > komutYolu()` ile tam yola çözülür (`where`/`which`).
+- **`spawn` + Windows: iki ayrı tuzak, ikisi de `platform.js`'te çözülür.**
+  1. npm'in global kurduğu programlar `codex.cmd` gibi batch shim'leridir;
+     Node `spawn` PATHEXT uygulamadığı için `spawn('codex')` **ENOENT** verir
+     → `komutYolu()` tam yolu `where`/`which` ile çözer.
+  2. Tam yolu vermek de yetmez: Node 18.20 / 20.12'deki güvenlik yaması
+     (CVE-2024-27980) `.cmd`/`.bat` dosyalarını kabuksuz çalıştırmayı
+     engeller, bu kez **EINVAL** gelir → `komutCagrisi()` bunları
+     `cmd.exe /c <yol>` biçimine çevirir. `shell: true` kullanılmaz;
+     uzun prompt metinlerinin tırnaklamasını bozar.
+  Dış komut çağıran her yeni kod `komutCagrisi()` üzerinden geçmeli
+  (`codex`, `npm`; `git` ve `.exe`'ler etkilenmez).
 - **Alt süreçlerde `error` olayı zorunlu:** yakalanmazsa Node işlenmemiş
   olay sayıp **tüm paneli düşürür**. Eksik bir CLI yüzünden kuyruk ve
   Telegram botu ölmemeli — hata oturum kartına yazılır, panel ayakta kalır.

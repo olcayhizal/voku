@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { komutYolu } from '../platform.js';
+import { komutCagrisi } from '../platform.js';
 
 export const ad = 'chatgpt-codex';
 export const tarayiciGerekli = false;
@@ -36,9 +36,18 @@ const CIKTI_SEMASI = {
   },
 };
 
-/** Codex'in tam yolu; kurulu değilse ham ad (hata mesajı çağıranda oluşur). */
-export function codexKomutu() {
-  return komutYolu('codex') || 'codex';
+/**
+ * Codex'i çalıştırma biçimi. Windows'ta npm shim'i `.cmd` olduğu için
+ * `cmd.exe /c` üzerinden gider (bkz. platform.js > komutCagrisi).
+ */
+export function codexCagrisi() {
+  return komutCagrisi('codex');
+}
+
+/** Codex'i verilen argümanlarla çalıştırır (platform farkını gizler). */
+function codexCalistir(argumanlar, secenekler) {
+  const { komut, onEk } = codexCagrisi();
+  return komutCalistir(komut, [...onEk, ...argumanlar], secenekler);
 }
 
 function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin } = {}) {
@@ -102,10 +111,11 @@ function codexKoku() {
 export const girisTipi = 'surec';
 
 export function girisKomutu(platform) {
-  const argumanlar = ['login'];
+  const { komut, onEk } = codexCagrisi();
+  const argumanlar = [...onEk, 'login'];
   if (platform?.deviceAuth) argumanlar.push('--device-auth');
   return {
-    komut: codexKomutu(),
+    komut,
     argumanlar,
     ipucu: platform?.deviceAuth
       ? 'Ekranda çıkan kodu chatgpt.com/device adresine gir.'
@@ -124,7 +134,7 @@ export function girisDurumu() {
 export async function hazirla() {
   let durum;
   try {
-    durum = await komutCalistir(codexKomutu(), ['login', 'status'], { timeoutMs: 30000 });
+    durum = await codexCalistir(['login', 'status'], { timeoutMs: 30000 });
   } catch (e) {
     if (/ENOENT|çalıştırılamadı/.test(e.message)) {
       throw new Error(
@@ -238,7 +248,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
         );
       } catch (e) {
         if (!/text\.format\.schema|output.?schema|400/i.test(e.message)) throw e;
-        ham = await komutCalistir(codexKomutu(), [...argumanlar, '-'], {
+        ham = await codexCalistir([...argumanlar, '-'], {
           timeoutMs: zamanAsimi,
           cwd: outDir,
           signal,
@@ -246,7 +256,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
         });
       }
     } else {
-      ham = await komutCalistir(codexKomutu(), [...argumanlar, '-'], {
+      ham = await codexCalistir([...argumanlar, '-'], {
         timeoutMs: zamanAsimi,
         cwd: outDir,
         signal,

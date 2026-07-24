@@ -18,6 +18,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ROOT } from './paths.js';
+import { komutCagrisi } from './platform.js';
 
 const calistir = promisify(execFile);
 const DURUM_DOSYASI = path.join(ROOT, '.guncelleme-durumu.json');
@@ -143,7 +144,11 @@ export async function guncelle() {
   const degisti = once !== sonra;
   let bagimlilik = false;
   if (degisti && kilitOzeti() !== oncekiKilit) {
-    await calistir('npm', ['install', '--no-audit', '--no-fund'], { cwd: ROOT, timeout: 600000 });
+    const npm = komutCagrisi('npm');
+    await calistir(npm.komut, [...npm.onEk, 'install', '--no-audit', '--no-fund'], {
+      cwd: ROOT,
+      timeout: 600000,
+    });
     bagimlilik = true;
   }
   await guncellemeVarMi({ zorla: true });

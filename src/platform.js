@@ -86,3 +86,24 @@ export function komutYolu(ad) {
 export function komutVarMi(ad) {
   return Boolean(komutYolu(ad));
 }
+
+/**
+ * Bir dış komutun nasıl çağrılacağı: `{ komut, onEk }`.
+ *
+ * Windows'ta ikinci tuzak: Node 18.20 / 20.12 ile gelen güvenlik yaması
+ * (CVE-2024-27980) `.cmd` ve `.bat` dosyalarının kabuk olmadan
+ * çalıştırılmasını engelliyor — `spawn('...codex.cmd')` bu kez **EINVAL**
+ * veriyor. Çözüm bunları `cmd.exe /c` üzerinden çağırmak; `shell: true`
+ * kullanılmıyor çünkü uzun prompt metinlerinin tırnaklamasını bozuyor
+ * (Node, argümanları kendisi doğru escape ediyor).
+ *
+ *   const { komut, onEk } = komutCagrisi('codex');
+ *   spawn(komut, [...onEk, 'login']);
+ */
+export function komutCagrisi(ad) {
+  const yol = komutYolu(ad) || ad;
+  if (WINDOWS && /\.(cmd|bat)$/i.test(yol)) {
+    return { komut: process.env.COMSPEC || 'cmd.exe', onEk: ['/c', yol] };
+  }
+  return { komut: yol, onEk: [] };
+}
