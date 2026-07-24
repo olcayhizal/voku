@@ -35,6 +35,21 @@ if not exist node_modules (
   call npm install --no-audit --no-fund >> logs\kurulum.log 2>&1
 )
 
+:acilis
+rem Durum yalniz degiskenleri doldursun diye ciktisi bastirilir.
+call :durum >nul
+if "!ACILISTA!"=="kapali" goto menu
+if "%PANEL%"=="calisiyor" if "%TUNEL%"=="acik" goto menu
+cls
+echo.
+echo   VOKU - hazirlaniyor...
+echo.
+if not "%PANEL%"=="calisiyor" call :panel_baslat
+if not "%TUNEL%"=="acik" (
+  echo   Dis erisim aciliyor...
+  call :tunel_baslat
+)
+
 :menu
 cls
 call :durum
@@ -47,6 +62,7 @@ echo   5  Her seyi kapat
 echo   6  Guncelle ^(GitHub'daki yeni surumu cek^)
 echo   7  Bilgisayar acilinca kendiliginden baslasin   [!OTO!]
 echo   8  Otomatik guncelleme                          [!OTOGUNCEL!]
+echo   9  Acilista panel + dis erisim                  [!ACILISTA!]
 echo   0  Cik ^(panel arka planda calismaya devam eder^)
 echo.
 set "secim="
@@ -60,6 +76,7 @@ if "%secim%"=="5" goto hepsini_kapat
 if "%secim%"=="6" goto guncelle
 if "%secim%"=="7" goto otomatik_baslat
 if "%secim%"=="8" goto otomatik_guncelle
+if "%secim%"=="9" goto acilista_degistir
 if "%secim%"=="0" goto cikis
 goto menu
 
@@ -72,6 +89,8 @@ set "ADRES="
 set "KUYRUK="
 set "OTO=kapali"
 set "OTOGUNCEL=kapali"
+set "ACILISTA=acik"
+set "LINK="
 set "GUNCELLEME="
 
 netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
@@ -95,6 +114,11 @@ if not errorlevel 1 (
 schtasks /query /tn "VOKU Panel" >nul 2>&1
 if not errorlevel 1 set "OTO=acik"
 
+if exist config\tunel.json (
+  findstr /c:"\"acilistaAc\": false" config\tunel.json >nul 2>&1
+  if not errorlevel 1 set "ACILISTA=kapali"
+)
+
 if exist config\guncelleme.json (
   findstr /c:"\"otomatik\": true" config\guncelleme.json >nul 2>&1
   if not errorlevel 1 set "OTOGUNCEL=acik"
@@ -111,6 +135,7 @@ if "%PANEL%"=="calisiyor" (
 echo   [.] Telegram   %TELEGRAM%
 if "%TUNEL%"=="acik" (
   echo   [+] Dis erisim acik         !ADRES!
+  call :baglanti_yaz
 ) else (
   echo   [ ] Dis erisim kapali
 )
@@ -119,6 +144,57 @@ if not "%KUYRUK%"=="" (
   echo   Kuyruk: %KUYRUK%
 )
 if not "%GUNCELLEME%"=="" echo   %GUNCELLEME%
+exit /b
+
+rem Paylasilacak tam baglanti - 2'ye basmaya gerek kalmasin.
+:baglanti_yaz
+for /f "delims=" %%K in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2^>nul') do set "ANAHTAR=%%K"
+if not "!ANAHTAR!"=="" echo       baglanti: !ADRES!/?anahtar=!ANAHTAR!
+exit /b
+
+rem Tuneli baslatir: kayitli adres varsa onunla (baglanti degismesin),
+rem alinamazsa serbest adresle tekrar dener ve yeni adresi kaydeder.
+:tunel_baslat
+tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
+if not errorlevel 1 exit /b 0
+where ngrok >nul 2>&1
+if errorlevel 1 exit /b 1
+ngrok config check >nul 2>&1
+if errorlevel 1 exit /b 1
+
+set "DOMAIN=%NGROK_DOMAIN%"
+if "!DOMAIN!"=="" (
+  for /f "delims=" %%D in ('node src\cli.js tunel 2^>nul') do set "DOMAIN=%%D"
+)
+if "!DOMAIN!"=="" (
+  start "" /b cmd /c "ngrok http %PORT% --log=stdout >> logs\ngrok.log 2>&1"
+) else (
+  start "" /b cmd /c "ngrok http %PORT% --url=!DOMAIN! --log=stdout >> logs\ngrok.log 2>&1"
+)
+
+call :adres_bekle
+if not "!ADRES!"=="" goto :tunel_kaydet
+
+rem Kayitli adres hesapta yoksa ngrok acilmaz; serbest adresle dene.
+if not "!DOMAIN!"=="" (
+  taskkill /f /im ngrok.exe >nul 2>&1
+  start "" /b cmd /c "ngrok http %PORT% --log=stdout >> logs\ngrok.log 2>&1"
+  call :adres_bekle
+)
+if "!ADRES!"=="" exit /b 1
+
+:tunel_kaydet
+call node src\cli.js tunel --kaydet "!ADRES!" >nul 2>&1
+exit /b 0
+
+:adres_bekle
+set "ADRES="
+for /l %%i in (1,1,25) do (
+  if "!ADRES!"=="" (
+    timeout /t 1 /nobreak >nul
+    for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const t=JSON.parse(s).tunnels.find(x=>x.public_url.startsWith('https'));console.log(t?t.public_url:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
+  )
+)
 exit /b
 
 rem ------------------------------------------------------- panel baslatma
@@ -176,23 +252,8 @@ if errorlevel 1 (
   goto menu
 )
 
-tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
-if errorlevel 1 (
-  echo   Dis erisim aciliyor...
-  if "%NGROK_DOMAIN%"=="" (
-    start "" /b cmd /c "ngrok http %PORT% --log=stdout >> logs\ngrok.log 2>&1"
-  ) else (
-    start "" /b cmd /c "ngrok http %PORT% --url=%NGROK_DOMAIN% --log=stdout >> logs\ngrok.log 2>&1"
-  )
-)
-
-set "ADRES="
-for /l %%i in (1,1,25) do (
-  if "!ADRES!"=="" (
-    timeout /t 1 /nobreak >nul
-    for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const t=JSON.parse(s).tunnels.find(x=>x.public_url.startsWith('https'));console.log(t?t.public_url:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
-  )
-)
+echo   Dis erisim aciliyor...
+call :tunel_baslat
 if "!ADRES!"=="" (
   echo   Dis adres alinamadi. logs\ngrok.log dosyasina bak.
   pause
@@ -314,6 +375,17 @@ if "%OTOGUNCEL%"=="acik" (
 ) else (
   call node src\cli.js guncelle --otomatik acik >nul 2>&1
   echo   Otomatik guncelleme acildi - panel her baslatildiginda yeni surum cekilir.
+)
+timeout /t 2 /nobreak >nul
+goto menu
+
+:acilista_degistir
+if "!ACILISTA!"=="acik" (
+  call node src\cli.js tunel --acilista kapali >nul 2>&1
+  echo   Kapatildi. Bundan sonra panel ve dis erisimi elle acarsin.
+) else (
+  call node src\cli.js tunel --acilista acik >nul 2>&1
+  echo   Acildi. Bu dosyayi her actiginda panel ve dis erisim kendiliginden kalkar.
 )
 timeout /t 2 /nobreak >nul
 goto menu

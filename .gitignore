@@ -19,3 +19,5 @@ sayfalar/
 config/prompts.json
 config/guncelleme.json
 .guncelleme-durumu.json
+
+config/tunel.json

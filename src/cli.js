@@ -377,6 +377,25 @@ async function main() {
       }
       return;
     }
+    case 'tunel': {
+      const t = await import('./tunel.js');
+      if (opsiyon.kaydet && opsiyon.kaydet !== true) {
+        const s = t.domainKaydet(opsiyon.kaydet);
+        log.ok(`Dış adres sabitlendi: ${s.domain}`);
+        return;
+      }
+      if (opsiyon.acilista !== undefined) {
+        const acik = opsiyon.acilista === 'acik' || opsiyon.acilista === true;
+        t.acilistaAcAyarla(acik);
+        log.ok(`Açılışta dış erişim ${acik ? 'açılacak' : 'açılmayacak'}.`);
+        return;
+      }
+      // Betikler bu iki satırı okuyor.
+      const s = t.tunelAyarlari();
+      console.log(s.domain || '');
+      if (opsiyon.tam) console.log(s.acilistaAc ? 'acilista-acik' : 'acilista-kapali');
+      return;
+    }
     case 'baglanti': {
       const { erisimAyarlariniYukle, misafirAnahtariniYenile } = await import('./erisim.js');
       const anahtar = opsiyon.yenile

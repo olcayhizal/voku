@@ -120,6 +120,8 @@ durum_ekrani() {
   adres="$(tunel_adresi)"
   if [ -n "$tp" ] && [ -n "$adres" ]; then
     yaz "  ${YESIL}●${SIFIR} Dış erişim açık         ${SOLUK}${adres}${SIFIR}"
+    # Paylaşılacak tam bağlantı gözde dursun — 2'ye basmaya gerek kalmasın.
+    yaz "  ${SOLUK}  bağlantı:${SIFIR} ${AMBER}$(misafir_linki)${SIFIR}"
   else
     yaz "  ${SOLUK}○${SIFIR} Dış erişim ${SOLUK}kapalı${SIFIR}"
   fi
@@ -139,6 +141,7 @@ durum_ekrani() {
   yaz "  ${AMBER}6${SIFIR}  Bilgisayar açılınca kendiliğinden başlasın   ${SOLUK}[$(otomatik_mi)]${SIFIR}"
   yaz "  ${AMBER}7${SIFIR}  Güncelle ${SOLUK}(GitHub'daki yeni sürümü çek)${SIFIR}"
   yaz "  ${AMBER}8${SIFIR}  Otomatik güncelleme                         ${SOLUK}[$(otomatik_guncelleme_mi)]${SIFIR}"
+  yaz "  ${AMBER}9${SIFIR}  Açılışta panel + dış erişim                 ${SOLUK}[$(acilista_etiket)]${SIFIR}"
   yaz "  ${AMBER}0${SIFIR}  Çık ${SOLUK}(panel arka planda çalışmaya devam eder)${SIFIR}"
   yaz ""
 }
@@ -189,6 +192,57 @@ panele_git() {
   sleep 1
 }
 
+# Kayıtlı dış adres (yoksa boş) — bağlantı her açılışta değişmesin.
+tunel_domaini() { node src/cli.js tunel 2>/dev/null | head -1; }
+acilista_ac_mi() { node src/cli.js tunel --tam 2>/dev/null | sed -n '2p'; }
+
+misafir_linki() {
+  local adres anahtar
+  adres="$(tunel_adresi)"
+  [ -z "$adres" ] && return 1
+  anahtar="$(node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2>/dev/null)"
+  printf '%s/?anahtar=%s' "$adres" "$anahtar"
+}
+
+# ngrok'u başlatır: kayıtlı adres varsa onunla, yoksa serbest — sonra
+# alınan adresi kaydeder ki bir dahaki sefere aynısı istensin.
+tuneli_baslat() {
+  [ -n "$(tunel_pid)" ] && return 0
+  command -v ngrok >/dev/null || return 1
+  ngrok config check >/dev/null 2>&1 || return 1
+
+  local domain
+  domain="${NGROK_DOMAIN:-$(tunel_domaini)}"
+  if [ -n "$domain" ]; then
+    nohup ngrok http "$PORT" --url="$domain" --log=stdout >> logs/ngrok.log 2>&1 &
+  else
+    nohup ngrok http "$PORT" --log=stdout >> logs/ngrok.log 2>&1 &
+  fi
+
+  local adres=""
+  for _ in $(seq 1 25); do
+    sleep 0.5
+    adres="$(tunel_adresi)"
+    [ -n "$adres" ] && break
+  done
+
+  # Kayıtlı adres hesapta yoksa ngrok açılmaz; serbest adresle tekrar dene.
+  if [ -z "$adres" ] && [ -n "$domain" ]; then
+    pkill -f "ngrok http $PORT" 2>/dev/null
+    sleep 1
+    nohup ngrok http "$PORT" --log=stdout >> logs/ngrok.log 2>&1 &
+    for _ in $(seq 1 25); do
+      sleep 0.5
+      adres="$(tunel_adresi)"
+      [ -n "$adres" ] && break
+    done
+  fi
+
+  [ -z "$adres" ] && return 1
+  node src/cli.js tunel --kaydet "$adres" >/dev/null 2>&1
+  return 0
+}
+
 disariya_ac() {
   panel_baslat || { bekle; return; }
 
@@ -221,28 +275,14 @@ disariya_ac() {
 
   if [ -z "$(tunel_pid)" ]; then
     yaz "  ${SOLUK}Dış erişim açılıyor...${SIFIR}"
-    if [ -n "${NGROK_DOMAIN:-}" ]; then
-      nohup ngrok http "$PORT" --url="$NGROK_DOMAIN" --log=stdout >> logs/ngrok.log 2>&1 &
-    else
-      nohup ngrok http "$PORT" --log=stdout >> logs/ngrok.log 2>&1 &
-    fi
   fi
-
-  local adres=""
-  for _ in $(seq 1 25); do
-    sleep 0.5
-    adres="$(tunel_adresi)"
-    [ -n "$adres" ] && break
-  done
-
-  if [ -z "$adres" ]; then
+  if ! tuneli_baslat; then
     yaz "  ${KIRMIZI}Dış adres alınamadı.${SIFIR} ${SOLUK}logs/ngrok.log dosyasına bak.${SIFIR}"
     bekle; return
   fi
 
-  local anahtar link
-  anahtar="$(node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2>/dev/null)"
-  link="${adres}/?anahtar=${anahtar}"
+  local link
+  link="$(misafir_linki)"
   printf '%s' "$link" | pbcopy 2>/dev/null
 
   clear
@@ -384,7 +424,41 @@ otomatik_guncelleme_degistir() {
   sleep 2
 }
 
+acilista_etiket() {
+  [ "$(acilista_ac_mi)" = "acilista-kapali" ] && echo "kapalı" || echo "açık"
+}
+
+acilista_degistir() {
+  if [ "$(acilista_etiket)" = "açık" ]; then
+    node src/cli.js tunel --acilista kapali >/dev/null 2>&1
+    yaz "  ${YESIL}Kapatıldı.${SIFIR} ${SOLUK}Bundan sonra panel ve dış erişimi elle açarsın.${SIFIR}"
+  else
+    node src/cli.js tunel --acilista acik >/dev/null 2>&1
+    yaz "  ${YESIL}Açıldı.${SIFIR} ${SOLUK}Bu dosyayı her açtığında panel ve dış erişim kendiliğinden kalkar.${SIFIR}"
+  fi
+  sleep 2
+}
+
+# Çift tıklandığında beklenen davranış: her şey çalışır durumda gelsin.
+# Kapalıysa panel ve dış erişim sessizce açılır (9 ile kapatılabilir).
+acilista_hazirla() {
+  [ "$(acilista_etiket)" = "kapalı" ] && return
+  local pp tp
+  pp="$(panel_pid)"; tp="$(tunel_pid)"
+  [ -n "$pp" ] && [ -n "$tp" ] && return
+  clear
+  yaz ""
+  yaz "  ${KALIN}VOKU${SIFIR} ${SOLUK}— hazırlanıyor...${SIFIR}"
+  yaz ""
+  [ -z "$pp" ] && panel_baslat
+  if [ -z "$tp" ]; then
+    yaz "  ${SOLUK}Dış erişim açılıyor...${SIFIR}"
+    tuneli_baslat || yaz "  ${SOLUK}Dış erişim açılamadı — menüden 2 ile deneyebilirsin.${SIFIR}"
+  fi
+}
+
 # ---- döngü ------------------------------------------------------------
+acilista_hazirla
 while true; do
   durum_ekrani
   printf '%s' "  Seçim: "
@@ -398,6 +472,7 @@ while true; do
     6) otomatik_baslat ;;
     7) guncelleme_yap ;;
     8) otomatik_guncelleme_degistir ;;
+    9) acilista_degistir ;;
     0|q|Q)
       clear
       yaz ""

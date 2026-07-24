@@ -272,6 +272,15 @@ güncelle · otomatik güncelleme · açılışta kendiliğinden başlat.
   Telegram botu yarıda kalmasın.
 - Çift tıkla açılan kabukta Homebrew/nvm PATH'te olmayabilir — script
   `/opt/homebrew/bin`, `/usr/local/bin` ve nvm yolunu kendisi ekler.
+- **Açılışta otomatik hazırlık:** dosya çift tıklandığında panel ve dış
+  erişim kapalıysa sessizce açılır (menüde 9 ile kapatılabilir,
+  `config/tunel.json > acilistaAc`). Beklenen davranış "her şey çalışır
+  durumda gelsin"; menü sonra çizilir.
+- **Dış adres sabit kalır:** ilk açılışta alınan ngrok adresi
+  `config/tunel.json`'a yazılır, sonraki açılışlarda `ngrok --url=<adres>`
+  ile aynısı istenir; hesapta yoksa serbest adrese düşüp yenisini kaydeder.
+  Misafir anahtarı zaten sabittir → paylaşılan bağlantı kalıcıdır. Menüde
+  tam bağlantı (adres + anahtar) hep görünür.
 - Otomatik başlatma: macOS'ta `~/Library/LaunchAgents/io.voku.panel.plist`
   (`RunAtLoad` + `KeepAlive`), Windows'ta Görev Zamanlayıcı ("VOKU Panel",
   onlogon) — komutu göreve gömmek yerine `scripts/baslat.cmd` çağrılır,
