@@ -213,6 +213,26 @@ async function surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar) {
   durum.girisSurecleri.set(platformAdi, kayit);
   log.info(`[${platformAdi}] giriş başlatıldı: ${komut} ${argumanlar.join(' ')}`);
 
+  // Program yoksa ChildProcess 'error' fırlatır; yakalanmazsa Node bunu
+  // işlenmemiş olay sayıp TÜM paneli düşürür. Eksik bir CLI yüzünden kuyruk
+  // ve Telegram botu ölmemeli — hata karta yazılır, panel ayakta kalır.
+  surec.on('error', (e) => {
+    durum.girisSurecleri.delete(platformAdi);
+    const mesaj =
+      e.code === 'ENOENT'
+        ? `"${komut}" bulunamadı. Codex CLI kurulu değil ya da PATH'te değil — kurmak için: npm install -g @openai/codex (kurduktan sonra paneli yeniden başlat).`
+        : e.message;
+    log.err(`[${platformAdi}] giriş başlatılamadı: ${mesaj}`);
+    yayinla('giris', { platform: platformAdi, metin: `${mesaj}\n` });
+    yayinla('giris', { platform: platformAdi, bitti: true, kod: -1 });
+    durum.dogrulama.set(platformAdi, {
+      hazir: false,
+      kontrol: new Date().toISOString(),
+      mesaj,
+    });
+    yayinla('platform', oturumDurumu(platform));
+  });
+
   const isle = (veri) => {
     const metin = String(veri);
     kayit.satirlar.push(metin);

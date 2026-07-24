@@ -54,3 +54,35 @@ export function pythonKomutu() {
 export function calistirilabilir(ad) {
   return WINDOWS ? `${ad}.exe` : ad;
 }
+
+const komutOnbellek = new Map();
+
+/**
+ * Bir komutun tam yolu — yoksa null.
+ *
+ * Windows'ta zorunlu: npm'in global kurduğu programlar `codex.cmd` gibi
+ * batch shim'leridir ve Node'un `spawn`'ı PATHEXT'i uygulamadığı için
+ * `spawn('codex')` ENOENT verir. Yolu `where` ile çözüp tam adıyla
+ * çağırmak tek güvenilir yol.
+ */
+export function komutYolu(ad) {
+  if (komutOnbellek.has(ad)) return komutOnbellek.get(ad);
+  let sonuc = null;
+  try {
+    const cikti = execFileSync(WINDOWS ? 'where' : 'which', [ad], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const satirlar = cikti.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    // Windows'ta birden çok eşleşme dönebilir; çalıştırılabilir olanı yeğle.
+    sonuc = satirlar.find((s) => /\.(cmd|bat|exe)$/i.test(s)) || satirlar[0] || null;
+  } catch {
+    sonuc = null;
+  }
+  komutOnbellek.set(ad, sonuc);
+  return sonuc;
+}
+
+export function komutVarMi(ad) {
+  return Boolean(komutYolu(ad));
+}

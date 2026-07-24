@@ -241,6 +241,13 @@ Değiştirmek için `config/settings.json > channel` (platform bazında
   "deneysel" etiketi duruyor) ya da WSL2 gerekir; Gemini köprüsü Go ile
   yeniden derlenmeli. Panel, Telegram botu, misafir erişimi platformdan
   bağımsızdır.
+- **`spawn` + Windows tuzağı:** npm'in global kurduğu programlar `codex.cmd`
+  gibi batch shim'leridir; Node `spawn` PATHEXT uygulamadığı için
+  `spawn('codex')` **ENOENT** verir. Bu yüzden dış komutlar
+  `platform.js > komutYolu()` ile tam yola çözülür (`where`/`which`).
+- **Alt süreçlerde `error` olayı zorunlu:** yakalanmazsa Node işlenmemiş
+  olay sayıp **tüm paneli düşürür**. Eksik bir CLI yüzünden kuyruk ve
+  Telegram botu ölmemeli — hata oturum kartına yazılır, panel ayakta kalır.
 
 ## VOKU.command / VOKU.cmd — çift tıklanan kontrol paneli
 Terminal bilmeyen biri için tek giriş noktası: Finder'dan çift tıkla, menü

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { komutYolu } from '../platform.js';
 
 export const ad = 'chatgpt-codex';
 export const tarayiciGerekli = false;
@@ -34,6 +35,11 @@ const CIKTI_SEMASI = {
     },
   },
 };
+
+/** Codex'in tam yolu; kurulu değilse ham ad (hata mesajı çağıranda oluşur). */
+export function codexKomutu() {
+  return komutYolu('codex') || 'codex';
+}
 
 function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin } = {}) {
   return new Promise((cozumle, reddet) => {
@@ -99,7 +105,7 @@ export function girisKomutu(platform) {
   const argumanlar = ['login'];
   if (platform?.deviceAuth) argumanlar.push('--device-auth');
   return {
-    komut: 'codex',
+    komut: codexKomutu(),
     argumanlar,
     ipucu: platform?.deviceAuth
       ? 'Ekranda çıkan kodu chatgpt.com/device adresine gir.'
@@ -118,7 +124,7 @@ export function girisDurumu() {
 export async function hazirla() {
   let durum;
   try {
-    durum = await komutCalistir('codex', ['login', 'status'], { timeoutMs: 30000 });
+    durum = await komutCalistir(codexKomutu(), ['login', 'status'], { timeoutMs: 30000 });
   } catch (e) {
     if (/ENOENT|çalıştırılamadı/.test(e.message)) {
       throw new Error(
@@ -232,7 +238,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
         );
       } catch (e) {
         if (!/text\.format\.schema|output.?schema|400/i.test(e.message)) throw e;
-        ham = await komutCalistir('codex', [...argumanlar, '-'], {
+        ham = await komutCalistir(codexKomutu(), [...argumanlar, '-'], {
           timeoutMs: zamanAsimi,
           cwd: outDir,
           signal,
@@ -240,7 +246,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
         });
       }
     } else {
-      ham = await komutCalistir('codex', [...argumanlar, '-'], {
+      ham = await komutCalistir(codexKomutu(), [...argumanlar, '-'], {
         timeoutMs: zamanAsimi,
         cwd: outDir,
         signal,

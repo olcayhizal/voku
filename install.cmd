@@ -31,7 +31,7 @@ pause
 
 rem ------------------------------------------------------------ 1. Git
 echo.
-echo   [1/5] Git kontrol ediliyor...
+echo   [1/6] Git kontrol ediliyor...
 where git >nul 2>&1
 if errorlevel 1 (
   echo         Git kurulu degil, kuruluyor...
@@ -52,7 +52,7 @@ if errorlevel 1 (
 )
 
 rem ----------------------------------------------------------- 2. Node.js
-echo   [2/5] Node.js kontrol ediliyor...
+echo   [2/6] Node.js kontrol ediliyor...
 where node >nul 2>&1
 if errorlevel 1 (
   echo         Node.js kurulu degil, kuruluyor...
@@ -74,7 +74,7 @@ if errorlevel 1 (
 )
 
 rem -------------------------------------------------------------- 3. Proje
-echo   [3/5] Proje indiriliyor...
+echo   [3/6] Proje indiriliyor...
 if exist "%HEDEF%\.git" (
   echo         Zaten kurulu, guncelleniyor...
   pushd "%HEDEF%"
@@ -93,7 +93,7 @@ if exist "%HEDEF%\.git" (
 )
 
 rem -------------------------------------------------------- 4. Bagimliliklar
-echo   [4/5] Bagimliliklar kuruluyor ^(bu adim uzun surebilir^)...
+echo   [4/6] Bagimliliklar kuruluyor ^(bu adim uzun surebilir^)...
 pushd "%HEDEF%"
 if not exist logs mkdir logs
 call npm install --no-audit --no-fund >> logs\kurulum.log 2>&1
@@ -107,12 +107,27 @@ if errorlevel 1 (
 )
 
 rem ------------------------------------------------- 5. Yapilandirma + kisayol
-echo   [5/5] Yapilandirma hazirlaniyor...
+echo   [5/6] Yapilandirma hazirlaniyor...
 if not exist config\telegram.json (
   if exist config\telegram.example.json copy /y config\telegram.example.json config\telegram.json >nul
 )
 if not exist config\prompts.json (
   if exist config\prompts.example.json copy /y config\prompts.example.json config\prompts.json >nul
+)
+
+rem --------------------------------------------------- 6. ChatGPT motoru
+echo   [6/6] ChatGPT motoru ^(Codex CLI^) kuruluyor...
+where codex >nul 2>&1
+if errorlevel 1 (
+  call npm install -g @openai/codex >> logs\kurulum.log 2>&1
+  if errorlevel 1 (
+    echo         Kurulamadi - ChatGPT motoru olmadan da calisir ^(Gemini^).
+    echo         Sonra elle denemek icin: npm install -g @openai/codex
+  ) else (
+    echo         Kuruldu.
+  )
+) else (
+  echo         Zaten kurulu.
 )
 
 rem Masaustune kisayol (PowerShell ile .lnk)
@@ -131,7 +146,7 @@ echo   Yapilacaklar:
 echo    1. Telegram botu kullanacaksan config\telegram.json icine
 echo       BotFather'dan aldigin token'i yaz.
 echo    2. config\prompts.json icine kendi prompt listeni koy.
-echo    3. ChatGPT motoru icin: npm i -g @openai/codex  ^(sonra panelden giris^)
+echo    3. Panelde Oturumlar sekmesinden ChatGPT ve Gemini girislerini yap.
 echo.
 set "c="
 set /p "c=  VOKU simdi acilsin mi? (e/h): "
