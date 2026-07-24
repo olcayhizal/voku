@@ -313,8 +313,17 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     if (path.resolve(path.dirname(kaynak)) === path.resolve(outDir)) return kaynak;
     const ek = gecerli.length > 1 ? `-${i + 1}` : '';
     const varis = path.join(outDir, `${baseName}${ek}${path.extname(kaynak) || '.png'}`);
-    fs.copyFileSync(kaynak, varis);
-    log.info(`[chatgpt-codex] çıktı iş klasörüne alındı: ${path.basename(varis)}`);
+    try {
+      fs.copyFileSync(kaynak, varis);
+    } catch (e) {
+      throw new Error(`Codex çıktısı iş klasörüne kopyalanamadı (${kaynak}): ${e.message}`);
+    }
+    // Kopya gerçekten diske düştü mü? Task'ı dosyasız "done" işaretlemektense
+    // hata verip yeniden denemek yeğdir — panelde boş kare bırakmasın.
+    if (!fs.existsSync(varis) || fs.statSync(varis).size < 1024) {
+      throw new Error(`Codex çıktısı kopyalandı ama okunamıyor: ${path.basename(varis)}`);
+    }
+    log.info(`[chatgpt-codex] çıktı iş klasörüne alındı: ${path.basename(kaynak)} → ${path.basename(varis)}`);
     return varis;
   });
 
