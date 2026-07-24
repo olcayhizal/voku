@@ -226,7 +226,13 @@ Değiştirmek için `config/settings.json > channel` (platform bazında
   `config/prompts.json`, `telegram.json`, `erisim.json`, `jobs/`, `sayfalar/`,
   `output/`, `.profiles/`, `tools/`. Örnek yapılandırmalar `*.example.json`.
 - **Windows kurulumu:** `install.cmd` — winget ile Git + Node.js, repo klonu,
-  `npm install`, örnek config kopyaları, masaüstü kısayolu.
+  `npm install`, örnek config kopyaları, Codex CLI, motor kurulumu, masaüstü
+  kısayolu.
+- **Motorlar depoda taşınmaz:** `tools/` üçüncü taraf koddur ve derlenmiş
+  binary içerir (.gitignore). Her makinede `scripts/motorlari-kur.cmd` /
+  `.command` ile kurulur: Go, köprü klonu, `patches/` altındaki yerel yama,
+  `go build`, watermark temizleyici klonu. Yama depoda tutulur çünkü köprü
+  onsuz görseli indirmiyor (lh3 URL'leri oturum bağımlı, dışarıdan 403).
 - **Güncelleme** (`src/guncelleme.js`, `cli guncelle`): `git pull --ff-only`.
   Yerel commit ya da kirli çalışma ağacı varsa **güncelleme yapılmaz** —
   kullanıcının kurulumunu sessizce ezmek en kötü senaryodur. `package-lock`

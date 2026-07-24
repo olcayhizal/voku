@@ -49,3 +49,29 @@ export function domainKaydet(adres) {
 export function acilistaAcAyarla(acik) {
   return yaz({ ...tunelAyarlari(), acilistaAc: Boolean(acik) });
 }
+
+/**
+ * Panel dışarı açık mı? Tüneli kontrol paneli başlatıyor, panel süreci
+ * değil — bu yüzden durum ngrok'un kendi yerel API'sinden okunur.
+ * Kısa süreli önbellek: `/api/state` her çağrıldığında ağa çıkılmasın.
+ */
+let onbellek = { at: 0, veri: { acik: false } };
+
+export async function disErisimDurumu() {
+  if (Date.now() - onbellek.at < 5000) return onbellek.veri;
+  let veri = { acik: false, adres: null };
+  try {
+    const yanit = await fetch('http://127.0.0.1:4040/api/tunnels', {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (yanit.ok) {
+      const j = await yanit.json();
+      const t = (j.tunnels || []).find((x) => String(x.public_url || '').startsWith('https'));
+      if (t) veri = { acik: true, adres: t.public_url };
+    }
+  } catch {
+    /* ngrok kapalı ya da yanıt vermiyor — dış erişim yok sayılır */
+  }
+  onbellek = { at: Date.now(), veri };
+  return veri;
+}

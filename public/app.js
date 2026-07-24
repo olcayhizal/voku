@@ -19,6 +19,7 @@ const state = {
   isSuzgec: 'tumu',
   kaynakSuzgec: 'tumu',
   telegram: null,
+  disErisim: null, // { acik, adres, misafirLink } — tünel açık mı
   rol: 'sahip', // 'sahip' | 'misafir' — misafir yalnız görüntüler
   kaydedilmedi: false,
   yeniFoto: null, // { base64, ad }
@@ -1164,6 +1165,26 @@ function oturumlariCiz() {
     },
       el('i'),
       'Telegram'
+    ),
+    // Dış erişim: panel internete açık mı, açıksa bağlantıyı tek tıkla aç.
+    el('span', {
+      class: `oturum-lamba ${state.disErisim?.acik ? 'acik' : ''}`,
+      title: state.disErisim?.acik
+        ? `Panel dışarı açık: ${state.disErisim.adres}`
+        : 'Dış erişim kapalı — VOKU kontrol panelinden "Dışarıya aç" ile açılır',
+    },
+      el('i'),
+      'Dış erişim',
+      state.disErisim?.acik && state.disErisim.misafirLink
+        ? el('a', {
+            class: 'lamba-link',
+            href: state.disErisim.misafirLink,
+            target: '_blank',
+            rel: 'noopener',
+            title: 'Misafir bağlantısını yeni sekmede aç',
+            onclick: (e) => e.stopPropagation(),
+          }, '↗')
+        : null
     )
   );
 }
@@ -1598,6 +1619,7 @@ async function durumuTazele() {
   rolUygula();
   state.platformlar = durum.platformlar;
   state.telegram = durum.telegram || null;
+  state.disErisim = durum.disErisim || null;
   state.joblar = durum.joblar;
   // Seçili iş silinmişse ilk işe düş; duruyorsa seçim korunur.
   if (state.seciliJob && !durum.joblar.some((j) => j.id === state.seciliJob)) {
@@ -1617,6 +1639,7 @@ async function baslat() {
   state.platformlar = durum.platformlar;
   state.joblar = durum.joblar;
   state.telegram = durum.telegram || null;
+  state.disErisim = durum.disErisim || null;
   state.seciliJob = durum.joblar[0]?.id || null;
 
   // Prompt listesi kurulum ekranı — misafirin ne görmesi ne yüklemesi gerekir.

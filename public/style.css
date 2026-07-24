@@ -275,6 +275,18 @@ body.misafir #barLambalar { display: none !important; }
   font-style: normal;
 }
 .oturum-lamba.acik i { background: var(--fixer); box-shadow: 0 0 6px rgba(111, 178, 166, 0.6); }
+
+/* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
+.lamba-link {
+  margin-left: 5px;
+  color: var(--paper-dim);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.lamba-link:hover { color: var(--safelight); background: rgba(232, 161, 60, 0.12); }
 .oturum-lamba.kapali i { background: var(--grease); }
 
 /* ---------------- düzen ---------------- */

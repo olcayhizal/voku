@@ -24,6 +24,7 @@ import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, roluBelirle, cerezKur, KAPI_SAYFASI } from './erisim.js';
+import { disErisimDurumu } from './tunel.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
 
@@ -389,7 +390,7 @@ function guvenliCiktiYolu(job, ...parcalar) {
   return hedef;
 }
 
-async function apiIstek(req, res, url, ayarlar, rol = 'sahip') {
+async function apiIstek(req, res, url, ayarlar, rol = 'sahip', erisim = null) {
   const yol = url.pathname;
   const parcalar = yol.split('/').filter(Boolean); // ['api', ...]
 
@@ -403,7 +404,15 @@ async function apiIstek(req, res, url, ayarlar, rol = 'sahip') {
 
   // --- durum + canlı akış ---
   if (yol === '/api/state' && req.method === 'GET') {
-    return json(res, 200, durumPaketi(ayarlar, rol));
+    const paket = durumPaketi(ayarlar, rol);
+    // Dış erişim durumu ngrok'un kendi API'sinden gelir; paylaşılacak tam
+    // bağlantı yalnız sahibe verilir (misafir kendi anahtarını zaten kullanıyor).
+    const d = await disErisimDurumu();
+    paket.disErisim =
+      rol === 'sahip' && d.acik && erisim?.misafirToken
+        ? { ...d, misafirLink: `${d.adres}/?anahtar=${erisim.misafirToken}` }
+        : { acik: d.acik, adres: rol === 'sahip' ? d.adres : null };
+    return json(res, 200, paket);
   }
 
   if (yol === '/api/events') {
@@ -722,7 +731,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
       // Anahtar adresten geldiyse çereze taşı; bağlantı bir kez kullanılsın yeter.
       if (url.searchParams.get('anahtar')) cerezKur(res, url.searchParams.get('anahtar'));
 
-      if (url.pathname.startsWith('/api/')) return await apiIstek(req, res, url, ayarlar, rol);
+      if (url.pathname.startsWith('/api/')) return await apiIstek(req, res, url, ayarlar, rol, erisim);
       const istenen = url.pathname === '/' ? '/index.html' : url.pathname;
       const dosya = path.join(PUBLIC_DIR, path.normalize(istenen).replace(/^(\.\.[/\\])+/, ''));
       if (!dosya.startsWith(PUBLIC_DIR)) {
