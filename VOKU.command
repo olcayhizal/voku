@@ -179,7 +179,9 @@ panel_baslat() {
   nohup caffeinate -dimsu node src/cli.js panel --port "$PORT" >> logs/panel.out 2>&1 &
   for _ in $(seq 1 30); do
     sleep 0.4
-    [ -n "$(panel_pid)" ] && return 0
+    # Port açıldıktan sonra Telegram botunun kendini tanıtması bir an sürer;
+    # menü "kapalı" yazmasın diye kısa bir soluk verilir.
+    [ -n "$(panel_pid)" ] && { sleep 1.5; return 0; }
   done
   yaz "  ${KIRMIZI}Panel açılamadı.${SIFIR} ${SOLUK}logs/panel.out dosyasına bak.${SIFIR}"
   return 1
@@ -207,7 +209,14 @@ misafir_linki() {
 # ngrok'u başlatır: kayıtlı adres varsa onunla, yoksa serbest — sonra
 # alınan adresi kaydeder ki bir dahaki sefere aynısı istensin.
 tuneli_baslat() {
-  [ -n "$(tunel_pid)" ] && return 0
+  # "Süreç var" tek başına yeterli değil: ölmekte olan ya da çökmüş bir
+  # ngrok örneği pgrep'te görünüp tüneli hazır sanmaya yol açıyor. Ölçüt
+  # adresin gerçekten alınabilmesi; alınamıyorsa artık süreç temizlenir.
+  if [ -n "$(tunel_pid)" ]; then
+    [ -n "$(tunel_adresi)" ] && return 0
+    pkill -f "ngrok http $PORT" 2>/dev/null
+    sleep 1
+  fi
   command -v ngrok >/dev/null || return 1
   ngrok config check >/dev/null 2>&1 || return 1
 

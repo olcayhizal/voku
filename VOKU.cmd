@@ -155,8 +155,16 @@ exit /b
 rem Tuneli baslatir: kayitli adres varsa onunla (baglanti degismesin),
 rem alinamazsa serbest adresle tekrar dener ve yeni adresi kaydeder.
 :tunel_baslat
+rem "Surec var" yeterli degil: olmekte olan bir ngrok ornegi tunelin hazir
+rem sanilmasina yol aciyor. Olcut adresin alinabilmesi.
 tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
-if not errorlevel 1 exit /b 0
+if not errorlevel 1 (
+  set "ADRES="
+  for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const t=JSON.parse(s).tunnels.find(x=>x.public_url.startsWith('https'));console.log(t?t.public_url:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
+  if not "!ADRES!"=="" exit /b 0
+  taskkill /f /im ngrok.exe >nul 2>&1
+  timeout /t 1 /nobreak >nul
+)
 where ngrok >nul 2>&1
 if errorlevel 1 exit /b 1
 ngrok config check >nul 2>&1

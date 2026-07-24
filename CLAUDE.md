@@ -276,6 +276,10 @@ güncelle · otomatik güncelleme · açılışta kendiliğinden başlat.
   erişim kapalıysa sessizce açılır (menüde 9 ile kapatılabilir,
   `config/tunel.json > acilistaAc`). Beklenen davranış "her şey çalışır
   durumda gelsin"; menü sonra çizilir.
+- **Tünel hazır mı ölçütü adrestir, süreç değil:** ölmekte olan bir ngrok
+  örneği `pgrep`/`tasklist`'te görünüp "zaten açık" sanılmasına yol açıyordu
+  (panel açılıyor, dış erişim sessizce kapalı kalıyordu). Süreç varsa ama
+  4040 API adres vermiyorsa süreç temizlenip yeniden başlatılır.
 - **Dış adres sabit kalır:** ilk açılışta alınan ngrok adresi
   `config/tunel.json`'a yazılır, sonraki açılışlarda `ngrok --url=<adres>`
   ile aynısı istenir; hesapta yoksa serbest adrese düşüp yenisini kaydeder.
