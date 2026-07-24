@@ -67,6 +67,14 @@ tool seçimi, dosya yazma ve doğrulama var. Süre buradan geliyor.
 `none` beklenenin aksine daha yavaş: düşünme kapalıyken ajan fazladan
 deneme turu atıyor. Ayar `platforms.chatgpt.codexConfig.model_reasoning_effort`.
 
+**Köprü portu paneli ezmesin.** Köprü portunu `.env`'den ya da `PORT` ortam
+değişkeninden alıyor; Windows kontrol panelindeki `set PORT=4173` alt
+süreçlere miras kalıp köprüyü panelin portuna bind etmeye itiyordu
+("bind: address already in use", ardından her işte yeniden başlatma denemesi).
+Port tek kaynaktan — `settings.json > platforms.gemini.baseUrl` — türetilip
+hem `.env`'e yazılır hem `spawn` env'ine verilir; betiklerdeki değişken de
+`VPORT`.
+
 **Gemini / HTTP köprüsü.** `tools/gemini-web-to-api` (Go, upstream
 ntthanh2603). Çerezle (`__Secure-1PSID`/`__Secure-1PSIDTS`) Gemini web
 oturumunu konuşur, OpenAI-uyumlu uç verir. Giriş **tarayıcıda** yapılır
