@@ -70,7 +70,7 @@ KOMUTLAR
                                 güncellemeyi ayarlar.
 
   baglanti [--adres <url>] [--yenile]
-                                Misafir bağlantısını yazar (salt görüntüleme).
+                                Paylaşım bağlantısını yazar (tam yetki).
                                 --adres ile tünel adresini birleştirir,
                                 --yenile eski bağlantıyı geçersiz kılar.
 
@@ -397,15 +397,13 @@ async function main() {
       return;
     }
     case 'baglanti': {
-      const { erisimAyarlariniYukle, misafirAnahtariniYenile } = await import('./erisim.js');
-      const anahtar = opsiyon.yenile
-        ? misafirAnahtariniYenile()
-        : erisimAyarlariniYukle().misafirToken;
-      if (opsiyon.yenile) log.ok('Misafir anahtarı yenilendi — eski bağlantı artık geçersiz.');
+      const { erisimAyarlariniYukle, anahtariYenile } = await import('./erisim.js');
+      const anahtar = opsiyon.yenile ? anahtariYenile() : erisimAyarlariniYukle().erisimToken;
+      if (opsiyon.yenile) log.ok('Anahtar yenilendi — eski bağlantı artık geçersiz.');
       const adres = String(opsiyon.adres || '').replace(/\/+$/, '') || '<tünel-adresi>';
-      console.log(`\n  Misafir bağlantısı (salt görüntüleme):\n  ${adres}/?anahtar=${anahtar}\n`);
-      console.log('  Bu bağlantıyla girenler işleri ve kareleri görür; iş açamaz,');
-      console.log('  silemez, prompt/oturum ekranlarına giremez.\n');
+      console.log(`\n  Paylaşım bağlantısı:\n  ${adres}/?anahtar=${anahtar}\n`);
+      console.log('  Bu bağlantıyla girenler paneli senin gibi kullanır:');
+      console.log('  iş açar, çalıştırır, siler. Yalnız ekiple paylaş.\n');
       return;
     }
     case 'telegram': {

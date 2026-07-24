@@ -121,7 +121,7 @@ durum_ekrani() {
   if [ -n "$tp" ] && [ -n "$adres" ]; then
     yaz "  ${YESIL}●${SIFIR} Dış erişim açık         ${SOLUK}${adres}${SIFIR}"
     # Paylaşılacak tam bağlantı gözde dursun — 2'ye basmaya gerek kalmasın.
-    yaz "  ${SOLUK}  bağlantı:${SIFIR} ${AMBER}$(misafir_linki)${SIFIR}"
+    yaz "  ${SOLUK}  bağlantı:${SIFIR} ${AMBER}$(paylasim_linki)${SIFIR}"
   else
     yaz "  ${SOLUK}○${SIFIR} Dış erişim ${SOLUK}kapalı${SIFIR}"
   fi
@@ -134,7 +134,7 @@ durum_ekrani() {
 
   yaz ""
   yaz "  ${AMBER}1${SIFIR}  Paneli aç ${SOLUK}(tarayıcıda)${SIFIR}"
-  yaz "  ${AMBER}2${SIFIR}  Dışarıya aç ${SOLUK}— misafir bağlantısı üret ve kopyala${SIFIR}"
+  yaz "  ${AMBER}2${SIFIR}  Dışarıya aç ${SOLUK}— paylaşım bağlantısı üret ve kopyala${SIFIR}"
   yaz "  ${AMBER}3${SIFIR}  Dış erişimi kapat"
   yaz "  ${AMBER}4${SIFIR}  Bağlantıyı yenile ${SOLUK}(eski bağlantı geçersiz olur)${SIFIR}"
   yaz "  ${AMBER}5${SIFIR}  Her şeyi kapat"
@@ -198,11 +198,11 @@ panele_git() {
 tunel_domaini() { node src/cli.js tunel 2>/dev/null | head -1; }
 acilista_ac_mi() { node src/cli.js tunel --tam 2>/dev/null | sed -n '2p'; }
 
-misafir_linki() {
+paylasim_linki() {
   local adres anahtar
   adres="$(tunel_adresi)"
   [ -z "$adres" ] && return 1
-  anahtar="$(node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2>/dev/null)"
+  anahtar="$(node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().erisimToken))" 2>/dev/null)"
   printf '%s/?anahtar=%s' "$adres" "$anahtar"
 }
 
@@ -291,7 +291,7 @@ disariya_ac() {
   fi
 
   local link
-  link="$(misafir_linki)"
+  link="$(paylasim_linki)"
   printf '%s' "$link" | pbcopy 2>/dev/null
 
   clear
@@ -302,8 +302,8 @@ disariya_ac() {
   yaz ""
   yaz "  ${AMBER}${link}${SIFIR}"
   yaz ""
-  yaz "  ${SOLUK}Bu bağlantıyla girenler işleri ve fotoğrafları görür;${SIFIR}"
-  yaz "  ${SOLUK}iş açamaz, silemez, ayarlara giremez.${SIFIR}"
+  yaz "  ${SOLUK}Bu bağlantıyla girenler paneli senin gibi kullanır:${SIFIR}"
+  yaz "  ${SOLUK}iş açar, çalıştırır, siler. Yalnız ekiple paylaş.${SIFIR}"
   yaz "  ${SOLUK}İlk açılışta bir uyarı sayfası çıkarsa 'Visit Site' demeleri yeterli.${SIFIR}"
   yaz ""
   yaz "  ${SOLUK}Bu bilgisayar uyursa bağlantı çalışmaz — kapağı açık bırak.${SIFIR}"

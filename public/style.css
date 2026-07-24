@@ -114,12 +114,6 @@ h3 {
   color: var(--safelight-loş);
 }
 
-/* Misafir görünümü: kurulum sekmeleri ve bağlantı lambaları kapalı.
-   Sunucu da yazan uçları 403'ler — bu yalnız görsel katman. */
-.misafir-rozet { color: var(--fixer); border: 1px solid currentColor; padding: 1px 6px; border-radius: 2px; }
-body.misafir .tabs-kurulum,
-body.misafir #barLambalar { display: none !important; }
-
 .tabs { display: flex; gap: 2px; }
 /* Akış sekmeleri solda kalır, kurulum sekmeleri lambalarla birlikte sağa iter. */
 .tabs-kurulum { margin-left: auto; }

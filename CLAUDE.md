@@ -253,7 +253,7 @@ Değiştirmek için `config/settings.json > channel` (platform bazında
   koşulu yazılmaz.
 - Windows'ta ChatGPT motoru için Codex CLI native kurulum (OpenAI'ın
   "deneysel" etiketi duruyor) ya da WSL2 gerekir; Gemini köprüsü Go ile
-  yeniden derlenmeli. Panel, Telegram botu, misafir erişimi platformdan
+  yeniden derlenmeli. Panel, Telegram botu, dış erişim platformdan
   bağımsızdır.
 - **`spawn` + Windows: iki ayrı tuzak, ikisi de `platform.js`'te çözülür.**
   1. npm'in global kurduğu programlar `codex.cmd` gibi batch shim'leridir;
@@ -276,7 +276,7 @@ gelsin. Masaüstündeki kısayoldan da açılır (script symlink zincirini çöz
 proje klasörüne geçer — `dirname "$0"` kısayolda masaüstünü gösterir).
 
 macOS'ta `VOKU.command` (bash), Windows'ta `VOKU.cmd` (batch) — aynı menü:
-paneli tarayıcıda aç · dışarıya aç (tünel + misafir bağlantısını panoya
+paneli tarayıcıda aç · dışarıya aç (tünel + paylaşım bağlantısını panoya
 kopyala) · dış erişimi kapat · bağlantıyı yenile · her şeyi kapat ·
 güncelle · otomatik güncelleme · açılışta kendiliğinden başlat.
 
@@ -307,32 +307,36 @@ güncelle · otomatik güncelleme · açılışta kendiliğinden başlat.
   yoksa (brew varsa) kurulumu teklif etmeye, authtoken yoksa
   `ngrok config add-authtoken` adımına yönlendirir.
 
-## Panel erişimi: sahip / misafir
-Panel bir tünelden (ngrok, Cloudflare, `ssh -R`) dışarı açıldığında iş silen,
-prompt değiştiren, hatta bu makinede Finder/Chrome açtıran uçlar da açılmış
-olur. Bu yüzden koruma **panelin kendisindedir** (`src/erisim.js`), tünel
-sağlayıcısında değil — tünel değişse de kural aynı kalır (ngrok'un ücretsiz
-planında zaten basic auth yok).
+## Panel erişimi: anahtar kapısı
+Panel bir tünelden (ngrok, Cloudflare, `ssh -R`) dışarı açıldığında dışarıdan
+gelen her istek **anahtar** ister. Koruma tünel sağlayıcısında değil panelin
+kendisindedir (`src/erisim.js`) — tünel değişse de kural aynı kalır (ngrok'un
+ücretsiz planında zaten basic auth yok).
 
-| rol | kim | ne yapar |
-|---|---|---|
-| `sahip` | yerel istekler + `sahipToken` | her şey |
-| `misafir` | `misafirToken`lı bağlantı | yalnız okur; yazan uçlar 403 |
-| yok | anahtarsız uzak istek | 401 + kapı sayfası |
+| kim | ne olur |
+|---|---|
+| yerel istekler (loopback, proxy başlığı yok) | anahtarsız girer |
+| anahtarlı istek | **tam yetki** — panelin sahibiyle aynı |
+| anahtarsız uzak istek | 401 + kapı sayfası |
+
+**Ayrı bir "yalnız görüntüleme" kipi yoktur:** bağlantı ekip arkadaşlarıyla
+paylaşılıyor, onlar da iş açıp yürütüyor. Yani anahtarı paylaşmak paneli
+paylaşmaktır; sızarsa `cli baglanti --yenile` anahtarı değiştirir ve eski
+bağlantı ölür.
 
 - **Yerel tespiti loopback'e bakmaz:** tünel ajanı da `127.0.0.1`'den bağlanır.
   Ayırt edici işaret `x-forwarded-for` / `x-real-ip` / `forwarded` başlıkları —
   biri varsa istek dışarıdandır, anahtar zorunludur.
-- Kural izin listesi değil **metot kuralıdır**: misafirde GET dışı her istek
-  403. Yeni uç eklendiğinde ayrıca korumaya gerek kalmasın diye.
-- Arayüzde misafire kurulum sekmeleri (Promptlar, Oturumlar), bağlantı
-  lambaları, "Yeni iş" ve tüm kare/iş eylemleri çizilmez.
-- Anahtarlar `config/erisim.json` (git dışı), ilk açılışta üretilir.
-  `node src/cli.js baglanti [--adres <url>] [--yenile]` bağlantıyı yazar,
-  `--yenile` sızan bağlantıyı geçersiz kılar.
-- `scripts/yayinla.sh` ngrok tünelini açıp misafir bağlantısını basar
-  (`NGROK_DOMAIN` ile sabit adres). ngrok ücretsiz planı: 1 GB/ay veri,
-  20k istek/ay — bu yüzden misafirde sessiz tazeleme 45 sn yerine 3 dk.
+- Anahtar `config/erisim.json` (git dışı), ilk açılışta üretilir. Alan adı
+  `erisimToken`; eski kurulumlardaki `misafirToken` da okunur, böylece daha
+  önce paylaşılmış bağlantılar çalışmaya devam eder.
+- `node src/cli.js baglanti [--adres <url>] [--yenile]` bağlantıyı yazar.
+- `scripts/yayinla.sh` ngrok tünelini açıp bağlantıyı basar (`NGROK_DOMAIN`
+  ile sabit adres). ngrok ücretsiz planı: 1 GB/ay veri, 20k istek/ay — görsel
+  önizlemeleri bu yüzden var.
+- Uzaktan basılan "Klasörü aç" ve "Giriş yap" panelin koştuğu makinede pencere
+  açar; ekip bunu bilerek kullanmalı.
+
 
 ## Görsel önizlemeler
 Kontak baskısı ve film şeridi ham PNG yüklemez: `?b=k` (480 px) / `?b=o`

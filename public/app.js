@@ -19,8 +19,7 @@ const state = {
   isSuzgec: 'tumu',
   kaynakSuzgec: 'tumu',
   telegram: null,
-  disErisim: null, // { acik, adres, misafirLink } — tünel açık mı
-  rol: 'sahip', // 'sahip' | 'misafir' — misafir yalnız görüntüler
+  disErisim: null, // { acik, adres, paylasimLinki } — tünel açık mı
   kaydedilmedi: false,
   yeniFoto: null, // { base64, ad }
 };
@@ -64,30 +63,6 @@ const KAYNAK = {
   telegram: { etiket: 'Telegram', isaret: '✈', ipucu: 'Telegram botundan geldi' },
 };
 const kaynakBilgisi = (job) => KAYNAK[job.kaynak] || KAYNAK.panel;
-
-/** Misafir görünümünde yazan her düğme çizilmez (sunucu da 403 döner). */
-const sahipMi = () => state.rol !== 'misafir';
-
-/**
- * Rolü arayüze uygular. Misafir yalnız işleri ve baskı odasını görür:
- * kurulum sekmeleri (prompt listesi, oturumlar), bağlantı lambaları ve
- * "Yeni iş" düğmesi ona kapalıdır — sunucu tarafında da 403 dönerler.
- */
-function rolUygula() {
-  const misafir = !sahipMi();
-  document.body.classList.toggle('misafir', misafir);
-  $('#yeniIsAc').classList.toggle('gizli', misafir);
-  $('#misafirRozet').classList.toggle('gizli', !misafir);
-  // Misafir kurulum sekmesindeyken rol düşerse İşler'e çekilir.
-  if (misafir && !$('#view-isler').classList.contains('gizli') === false) {
-    const acik = $$('.view').find((v) => !v.classList.contains('gizli'));
-    if (acik && (acik.id === 'view-promptlar' || acik.id === 'view-oturumlar')) {
-      $$('.view').forEach((v) => v.classList.add('gizli'));
-      $('#view-isler').classList.remove('gizli');
-      $$('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.view === 'isler')));
-    }
-  }
-}
 
 /**
  * Görsel adresi. `boy` verilirse önizleme gelir: kontak baskısı ve film
@@ -518,8 +493,7 @@ function jobDetayCiz() {
         job.note ? el('span', { text: job.note }) : null
       )
     ),
-    // Misafir görünümünde iş üzerinde hiçbir eylem yok (sunucu da 403 döner).
-    !sahipMi() ? null : el('div', { class: 'tabaka-eylem' },
+    el('div', { class: 'tabaka-eylem' },
       job.kosuyor
         ? el('button', {
             class: 'btn btn-kucuk btn-durdur',
@@ -646,12 +620,7 @@ function jobDetayCiz() {
               ? `${secili.etiket.toLocaleLowerCase('tr')} hazırlanıyor`
               : `${DURUM_ETIKET[t.status]}${t.attempts > 1 ? ` · ${t.attempts}. deneme` : ''}`,
         }),
-        // Seçim, basıldı işareti ve yenileme yazan işlemler — misafirde yok.
-        !sahipMi()
-          ? state.varyant === 'print' && bilgi.dosya
-            ? el('span', { class: 'adet-rozet', text: `×${bilgi.adet}` })
-            : null
-        : state.varyant === 'baski' && t.status === 'done' && dosyaHazirMi(t)
+        state.varyant === 'baski' && t.status === 'done' && dosyaHazirMi(t)
           ? bilgi.secili
             ? adetKontrolu(job.id, bilgi)
             : el('button', {
@@ -689,7 +658,7 @@ function jobDetayCiz() {
         el('span', { class: 'pid', text: t.promptId }),
         el('span', { class: 'ptext', text: t.prompt })
       ),
-      state.varyant === 'print' && bilgi.dosya && sahipMi()
+      state.varyant === 'print' && bilgi.dosya
         ? el('button', {
             class: 'kare-tekrar kare-sayfa-git',
             text: 'sayfaya git →',
@@ -1175,13 +1144,13 @@ function oturumlariCiz() {
     },
       el('i'),
       'Dış erişim',
-      state.disErisim?.acik && state.disErisim.misafirLink
+      state.disErisim?.acik && state.disErisim.paylasimLinki
         ? el('a', {
             class: 'lamba-link',
-            href: state.disErisim.misafirLink,
+            href: state.disErisim.paylasimLinki,
             target: '_blank',
             rel: 'noopener',
-            title: 'Misafir bağlantısını yeni sekmede aç',
+            title: 'Paylaşım bağlantısını yeni sekmede aç',
             onclick: (e) => e.stopPropagation(),
           }, '↗')
         : null
@@ -1358,7 +1327,7 @@ function sayfaDetayCiz() {
           el('span', { text: isAdlari.join(', ') })
         )
       ),
-      !sahipMi() ? null : el('div', { class: 'tabaka-eylem' },
+      el('div', { class: 'tabaka-eylem' },
         s.basildi
           ? el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Basımı geri al', onclick: (e) => sayfaEylem(s.id, 'geri-al', e.target) })
           : el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Basıldı olarak işaretle', onclick: (e) => sayfaEylem(s.id, 'bas', e.target) }),
@@ -1615,8 +1584,6 @@ async function durumuTazele() {
   } catch {
     return; // sunucu kapalıysa akış hatası zaten görünüyor
   }
-  state.rol = durum.rol || 'sahip';
-  rolUygula();
   state.platformlar = durum.platformlar;
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;
@@ -1634,16 +1601,13 @@ async function durumuTazele() {
 
 async function baslat() {
   const durum = await api('/api/state');
-  state.rol = durum.rol || 'sahip';
-  rolUygula();
   state.platformlar = durum.platformlar;
   state.joblar = durum.joblar;
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;
   state.seciliJob = durum.joblar[0]?.id || null;
 
-  // Prompt listesi kurulum ekranı — misafirin ne görmesi ne yüklemesi gerekir.
-  if (sahipMi()) await promptlariYukle();
+  await promptlariYukle();
   jobListesiCiz();
   jobDetayCiz();
   oturumlariCiz();
@@ -1653,12 +1617,8 @@ async function baslat() {
   // Emniyet ağı: SSE canlı akışı taşır ama bir paket kaçarsa panel sessizce
   // bayatlar. Sekme görünürken 45 sn'de bir, sekmeye dönüldüğünde hemen
   // senkronlanır — kullanıcının F5'e basması gerekmesin.
-  // Misafir çoğu zaman bir tünelin (ngrok) arkasında: orada aylık istek kotası
-  // var, bu yüzden sessiz tazeleme seyrekleşir — canlı akış zaten SSE'den gelir.
   setInterval(() => {
-    if (document.visibilityState !== 'visible') return;
-    if (!sahipMi() && Date.now() - sonTazeleme < 180000) return;
-    durumuTazele();
+    if (document.visibilityState === 'visible') durumuTazele();
   }, 45000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') durumuTazele();

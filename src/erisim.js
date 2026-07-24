@@ -1,21 +1,19 @@
 /**
- * Panel erişimi — sahip / misafir.
+ * Panel erişimi — anahtar kapısı.
  *
  * Panel yerelde kimlik doğrulamasız çalışır (kendi makinen, 127.0.0.1).
- * Bir tünelin (ngrok, Cloudflare, ssh -R) arkasına konduğunda ise iş silen,
- * prompt değiştiren, hatta senin makinende Finder/Chrome açtıran uçlar
- * dışarıya açılmış olur. Bu yüzden koruma **panelin kendisinde** durur,
- * tünel sağlayıcısında değil: tünel değişse de kural aynı kalır.
+ * Bir tünelin (ngrok, Cloudflare, ssh -R) arkasına konduğunda ise dışarıdan
+ * gelen her istek **anahtar** ister; anahtarsız istek 401 alır ve kapı
+ * sayfasını görür. Koruma tünel sağlayıcısında değil panelin kendisinde
+ * durur: tünel değişse de kural aynı kalır.
  *
- * Roller:
- *   sahip   — her şeyi yapar. Yerel (loopback, proxy başlığı olmayan) istekler
- *             ve sahip anahtarıyla gelenler.
- *   misafir — yalnız okur. Kuyruk, kareler, ışık kutusu görünür; yazan her
- *             uç (POST/PUT/DELETE) 403 döner.
- *   yok     — anahtarsız uzak istek; 401.
+ * Anahtarla giren paneli **tam yetkiyle** kullanır — bağlantı ekip
+ * arkadaşlarıyla paylaşılıyor, onlar da iş açıp yürütüyor. Yani anahtarı
+ * paylaşmak paneli paylaşmaktır; sızarsa `cli baglanti --yenile` ile
+ * anahtar değiştirilir.
  *
- * Anahtarlar `config/erisim.json` içinde tutulur (git dışı). Dosya yoksa
- * ilk açılışta üretilir — panel korumasız açılmasın diye.
+ * Anahtar `config/erisim.json` içinde tutulur (git dışı). Dosya yoksa ilk
+ * açılışta üretilir — panel korumasız açılmasın diye.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,26 +33,32 @@ export function erisimAyarlariniYukle() {
     }
   }
   const s = {
-    // Yerel istekler anahtarsız sahiptir; kapatmak istersen false yap.
+    // Yerel istekler anahtarsız girer; kapatmak istersen false yap.
     yerelSahip: ham.yerelSahip !== false,
-    misafirToken: ham.misafirToken || crypto.randomBytes(16).toString('hex'),
-    // Sahip anahtarı isteğe bağlı: uzaktan tam yetkiyle girmek istersen doldur.
-    sahipToken: ham.sahipToken || null,
+    // Alan adı eski kurulumlarla uyumlu kalsın: paylaşılmış bağlantılardaki
+    // anahtar değişmesin diye `misafirToken` okunmaya devam eder.
+    erisimToken:
+      ham.erisimToken || ham.misafirToken || crypto.randomBytes(16).toString('hex'),
   };
-  if (!fs.existsSync(DOSYA) || !ham.misafirToken) {
+  s.misafirToken = s.erisimToken; // geriye dönük ad
+  if (!fs.existsSync(DOSYA) || !(ham.erisimToken || ham.misafirToken)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(DOSYA, JSON.stringify(s, null, 2) + '\n');
   }
   return s;
 }
 
-/** Misafir anahtarını yeniler — paylaşılan bağlantı sızarsa bu tek adım yeter. */
-export function misafirAnahtariniYenile() {
+/** Anahtarı yeniler — paylaşılan bağlantı sızarsa bu tek adım yeter. */
+export function anahtariYenile() {
   const s = erisimAyarlariniYukle();
-  s.misafirToken = crypto.randomBytes(16).toString('hex');
+  s.erisimToken = crypto.randomBytes(16).toString('hex');
+  s.misafirToken = s.erisimToken;
   fs.writeFileSync(DOSYA, JSON.stringify(s, null, 2) + '\n');
-  return s.misafirToken;
+  return s.erisimToken;
 }
+
+/** Eski ad — betikler ve dış çağrılar kırılmasın. */
+export const misafirAnahtariniYenile = anahtariYenile;
 
 function cerezOku(req, ad) {
   const ham = req.headers.cookie;
@@ -81,14 +85,15 @@ function yerelMi(req) {
 
 export const COOKIE_ADI = 'voku_anahtar';
 
-/** İsteğin rolünü belirler: 'sahip' | 'misafir' | null */
-export function roluBelirle(req, url, erisim) {
-  if (erisim.yerelSahip && yerelMi(req)) return 'sahip';
+/**
+ * İstek panele girebilir mi? `true` = tam yetki, `false` = 401.
+ * Ayrı bir "yalnız görüntüleme" kipi yok: bağlantı ekiple paylaşılıyor.
+ */
+export function girebilirMi(req, url, erisim) {
+  if (erisim.yerelSahip && yerelMi(req)) return true;
   const anahtar = url.searchParams.get('anahtar') || cerezOku(req, COOKIE_ADI);
-  if (!anahtar) return null;
-  if (erisim.sahipToken && anahtar === erisim.sahipToken) return 'sahip';
-  if (erisim.misafirToken && anahtar === erisim.misafirToken) return 'misafir';
-  return null;
+  if (!anahtar) return false;
+  return anahtar === erisim.erisimToken;
 }
 
 /** Adresteki anahtarı çereze taşır — sonraki isteklerde bağlantı çıplak kalsın. */

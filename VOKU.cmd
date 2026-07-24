@@ -5,7 +5,7 @@ title VOKU
 
 rem  VOKU - cift tiklanan kontrol paneli (Windows).
 rem  macOS'taki VOKU.command ile ayni menu: panel/bot baslat-durdur, dis
-rem  erisim (ngrok), misafir baglantisi, guncelleme, otomatik baslatma.
+rem  erisim (ngrok), paylasim baglantisi, guncelleme, otomatik baslatma.
 rem
 rem  Not: bat dosyalarinda Turkce karakter kod sayfasina bagli oldugu icin
 rem  menu metinleri sade (aksansiz) yazildi - bozuk gorunmesindense duz.
@@ -55,7 +55,7 @@ cls
 call :durum
 echo.
 echo   1  Paneli ac ^(tarayicida^)
-echo   2  Disariya ac - misafir baglantisi uret ve kopyala
+echo   2  Disariya ac - paylasim baglantisi uret ve kopyala
 echo   3  Dis erisimi kapat
 echo   4  Baglantiyi yenile ^(eski baglanti gecersiz olur^)
 echo   5  Her seyi kapat
@@ -148,7 +148,7 @@ exit /b
 
 rem Paylasilacak tam baglanti - 2'ye basmaya gerek kalmasin.
 :baglanti_yaz
-for /f "delims=" %%K in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2^>nul') do set "ANAHTAR=%%K"
+for /f "delims=" %%K in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().erisimToken))" 2^>nul') do set "ANAHTAR=%%K"
 if not "!ANAHTAR!"=="" echo       baglanti: !ADRES!/?anahtar=!ANAHTAR!
 exit /b
 
@@ -268,7 +268,7 @@ if "!ADRES!"=="" (
   goto menu
 )
 
-for /f "delims=" %%A in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().misafirToken))" 2^>nul') do set "ANAHTAR=%%A"
+for /f "delims=" %%A in ('node -e "import('./src/erisim.js').then(m=>console.log(m.erisimAyarlariniYukle().erisimToken))" 2^>nul') do set "ANAHTAR=%%A"
 set "LINK=!ADRES!/?anahtar=!ANAHTAR!"
 <nul set /p "=!LINK!" | clip
 
@@ -280,8 +280,8 @@ echo   Paylasilacak baglanti ^(panoya kopyalandi - WhatsApp'a yapistir^)
 echo.
 echo   !LINK!
 echo.
-echo   Bu baglantiyla girenler isleri ve fotograflari gorur;
-echo   is acamaz, silemez, ayarlara giremez.
+echo   Bu baglantiyla girenler paneli senin gibi kullanir:
+echo   is acar, calistirir, siler. Yalniz ekiple paylas.
 echo   Ilk acilista uyari sayfasi cikarsa 'Visit Site' demeleri yeterli.
 echo.
 echo   Bu bilgisayar uyursa baglanti calismaz.

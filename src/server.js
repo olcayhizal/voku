@@ -23,7 +23,7 @@ import { odaOzeti, sayfaBul, sayfayiBas, basimiGeriAl, etdxUret } from './sayfa.
 import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
-import { erisimAyarlariniYukle, roluBelirle, cerezKur, KAPI_SAYFASI } from './erisim.js';
+import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
@@ -158,9 +158,8 @@ function oturumDurumu(platform) {
   };
 }
 
-function durumPaketi(ayarlar, rol = 'sahip') {
+function durumPaketi(ayarlar) {
   return {
-    rol,
     platformlar: Object.values(ayarlar.platforms).map(oturumDurumu),
     joblar: jobListele().map(jobOzet).reverse(),
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
@@ -390,28 +389,20 @@ function guvenliCiktiYolu(job, ...parcalar) {
   return hedef;
 }
 
-async function apiIstek(req, res, url, ayarlar, rol = 'sahip', erisim = null) {
+async function apiIstek(req, res, url, ayarlar, erisim = null) {
   const yol = url.pathname;
   const parcalar = yol.split('/').filter(Boolean); // ['api', ...]
 
-  // Misafir yalnız okur. Tek kural yeter: yazan her uç kapalı — iş açma,
-  // çalıştırma, durdurma, silme, prompt kaydetme, oturum açma, baskı seçimi,
-  // "klasörü aç". Yeni bir uç eklenince ayrıca korumaya gerek kalmasın diye
-  // izin listesi değil, metot kuralı.
-  if (rol !== 'sahip' && req.method !== 'GET') {
-    return json(res, 403, { hata: 'Misafir görünümünde bu işlem kapalı.' });
-  }
-
   // --- durum + canlı akış ---
   if (yol === '/api/state' && req.method === 'GET') {
-    const paket = durumPaketi(ayarlar, rol);
-    // Dış erişim durumu ngrok'un kendi API'sinden gelir; paylaşılacak tam
-    // bağlantı yalnız sahibe verilir (misafir kendi anahtarını zaten kullanıyor).
+    const paket = durumPaketi(ayarlar);
+    // Dış erişim durumu ngrok'un kendi API'sinden gelir; panele girebilen
+    // herkes bağlantıyı da görür (ekiple paylaşılan tek anahtar).
     const d = await disErisimDurumu();
     paket.disErisim =
-      rol === 'sahip' && d.acik && erisim?.misafirToken
-        ? { ...d, misafirLink: `${d.adres}/?anahtar=${erisim.misafirToken}` }
-        : { acik: d.acik, adres: rol === 'sahip' ? d.adres : null };
+      d.acik && erisim?.erisimToken
+        ? { ...d, paylasimLinki: `${d.adres}/?anahtar=${erisim.erisimToken}` }
+        : d;
     return json(res, 200, paket);
   }
 
@@ -721,8 +712,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   const sunucu = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     try {
-      const rol = roluBelirle(req, url, erisim);
-      if (!rol) {
+      if (!girebilirMi(req, url, erisim)) {
         // Anahtarsız uzak istek: sayfa isteyen kapıyı görür, API 401 alır.
         if (url.pathname.startsWith('/api/')) return json(res, 401, { hata: 'Anahtar gerekli.' });
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
@@ -731,7 +721,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
       // Anahtar adresten geldiyse çereze taşı; bağlantı bir kez kullanılsın yeter.
       if (url.searchParams.get('anahtar')) cerezKur(res, url.searchParams.get('anahtar'));
 
-      if (url.pathname.startsWith('/api/')) return await apiIstek(req, res, url, ayarlar, rol, erisim);
+      if (url.pathname.startsWith('/api/')) return await apiIstek(req, res, url, ayarlar, erisim);
       const istenen = url.pathname === '/' ? '/index.html' : url.pathname;
       const dosya = path.join(PUBLIC_DIR, path.normalize(istenen).replace(/^(\.\.[/\\])+/, ''));
       if (!dosya.startsWith(PUBLIC_DIR)) {
@@ -749,7 +739,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   sunucu.listen(port, '127.0.0.1', () => {
     const adres = `http://127.0.0.1:${port}`;
     log.ok(`Panel açık: ${adres}`);
-    log.info(`Misafir bağlantısı: <dış-adres>/?anahtar=${erisim.misafirToken}`);
+    log.info(`Paylaşım bağlantısı: <dış-adres>/?anahtar=${erisim.erisimToken}`);
     log.info('Kapatmak için Ctrl+C.');
     if (ac) tarayicidaAc(adres);
   });

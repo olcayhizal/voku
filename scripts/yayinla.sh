@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# voku panelini ngrok üzerinden dışarı açar ve misafir bağlantısını basar.
+# voku panelini ngrok üzerinden dışarı açar ve paylaşım bağlantısını basar.
 #
 # Panel yalnız 127.0.0.1'e bağlıdır; ngrok o portu dışarı taşır. Kimlik
 # doğrulama panelin kendisindedir (config/erisim.json) — ngrok'un ücretsiz
