@@ -151,6 +151,11 @@ pencerede aynı anda doldurup birlikte kilitler).
 - **Limit tespiti:** Codex çıktısından `chatgpt-codex > limitHatasiCoz`
   (ISO `resets_at`, "in 3h 20m", "at 6:34 AM"); Gemini köprüsünde 429 /
   "quota|resource exhausted". Reset okunamazsa muhafazakâr 1 saat cooldown.
+  Gemini köprüsü **boş model listesi** dönerse ("Available models: []") o
+  hesabın çerezi ölmüştür (oturuma bağlanamıyor) — bu da failover'a girer
+  (`e.sebep='oturum'`, 30 dk cooldown, panelde "oturum geçersiz"). Model
+  listesi DOLU gelirse ("...[gemini-2.0-flash, ...]") yanlış model adıdır;
+  bu kalıcı config hatası, failover yapılmaz, normal hata sayılır.
 - **Panel yönetimi (Oturumlar sekmesi):** her platform bir kart, içinde her
   hesap için ayrı satır (giriş durumu + havuz durumu: hazır / çalışıyor N/M /
   limitte HH:MM'e kadar). Düğmeler: **Giriş yap** (Codex süreçli, canlı çıktı +

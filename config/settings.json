@@ -17,7 +17,15 @@
       "concurrency": 4,
       "codexConfig": {
         "model_reasoning_effort": "low"
-      }
+      },
+      "hesaplar": [
+        {
+          "ad": "varsayılan"
+        },
+        {
+          "ad": "Olcay"
+        }
+      ]
     },
     "gemini": {
       "adapter": "gemini-http",

@@ -120,12 +120,14 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
         return 'pending';
       }
 
-      // KOTA hatası: hesabı dinlenmeye al, denemeyi HARCAMA, başka hesaba geç.
+      // Hesap kullanılamaz (kota dolu VEYA oturum geçersiz): dinlenmeye al,
+      // denemeyi HARCAMA, başka hesaba geç.
       if (e.limitDolu) {
         task.attempts -= 1;
         havuz.dinlenmeyeAl(platformAdi, hesap.ad, e.resetsAt, e.message);
         const ne = e.resetsAt ? `${saatEtiketi(e.resetsAt)}'e kadar` : '(reset okunamadı, ~1s)';
-        log.warn(`[${platformAdi}:${hesap.ad}] limit doldu ${ne} — başka hesaba geçiliyor`);
+        const sebep = e.sebep === 'oturum' ? 'oturum geçersiz' : 'limit doldu';
+        log.warn(`[${platformAdi}:${hesap.ad}] ${sebep} ${ne} — başka hesaba geçiliyor`);
         task.status = 'pending';
         jobYaz(job);
         continue;

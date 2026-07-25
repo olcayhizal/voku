@@ -231,12 +231,23 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
   });
 
   if (!yanit.ok) {
-    const govde = (await yanit.text()).slice(0, 300);
+    const govde = (await yanit.text()).slice(0, 400);
     // Kota/limit ise havuz bu hesabı dinlenmeye alsın (429 ya da metin).
     if (yanit.status === 429 || /quota|rate limit|resource.?exhausted|too many/i.test(govde)) {
       const e = new Error(`Gemini kullanım limiti doldu (${yanit.status}).`);
       e.limitDolu = true;
       e.resetsAt = null; // köprü net reset zamanı vermiyor → varsayılan cooldown
+      throw e;
+    }
+    // BOŞ model listesi = köprü Gemini oturumuna hiç bağlanamadı (çerez ölmüş).
+    // Model adı yanlış olsaydı liste DOLU gelir ("Available models: [gemini-...]")
+    // — o kalıcı bir config hatasıdır, failover işe yaramaz, normal hata sayılır.
+    if (/Available models:\s*\[\s*\]/i.test(govde) || /not supported or not available[\s\S]*\[\s*\]/i.test(govde)) {
+      const e = new Error('Gemini oturumu geçersiz (çerezler ölmüş olabilir) — bu hesaba yeniden giriş gerekebilir.');
+      e.limitDolu = true; // aynı failover yolu: bu hesabı dinlenmeye al, ötekine geç
+      e.sebep = 'oturum';
+      // Çerez yenilenince düzelir; kalıcı reset yok, 30 dk sonra tekrar denenir.
+      e.resetsAt = Date.now() + 30 * 60 * 1000;
       throw e;
     }
     throw new Error(`Gemini köprüsü ${yanit.status}: ${govde}`);
