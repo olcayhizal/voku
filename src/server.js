@@ -351,7 +351,21 @@ async function loginBitir(platformAdi, ayarlar, hesapAd) {
   // Sürücü çerez istiyorsa (HTTP köprüsü) pencere kapanmadan önce al.
   if (typeof adaptor.cerezleriSenkronla === 'function') {
     try {
-      const cerezler = await kayit.ctx.cookies(['https://gemini.google.com', 'https://google.com']);
+      // __Secure-1PSIDTS kısa ömürlü ve Google onu giriş anından birkaç saniye
+      // sonra set eder — "Girişi tamamladım"a basıldığında henüz olmayabilir.
+      // Gemini'yi bir kez taze yükleyip bekleyerek çerezin oluşmasını sağla.
+      const sayfa = kayit.ctx.pages()[0];
+      if (sayfa) {
+        try {
+          await sayfa.goto(platform.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+          await sayfa.waitForTimeout(3500);
+        } catch {
+          /* yükleme takılsa da eldeki çerezle devam et */
+        }
+      }
+      // Argümansız: tüm domainlerdeki çerezler (HttpOnly dahil) — PSIDTS
+      // hangi kayıtta olursa olsun yakalanır.
+      const cerezler = await kayit.ctx.cookies();
       await adaptor.cerezleriSenkronla(cerezler, platform, hesap);
     } catch (e) {
       log.warn(`[${platformAdi}/${hesap?.ad}] çerez senkronu başarısız: ${e.message}`);

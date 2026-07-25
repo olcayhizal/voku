@@ -85,6 +85,13 @@ hem `.env`'e yazılır hem `spawn` env'ine verilir; betiklerdeki değişken de
 ntthanh2603). Çerezle (`__Secure-1PSID`/`__Secure-1PSIDTS`) Gemini web
 oturumunu konuşur, OpenAI-uyumlu uç verir. Giriş **tarayıcıda** yapılır
 (profil), panel giriş biterken çerezleri köprünün `.env`'ine senkronlar.
+- **`__Secure-1PSIDTS` yakalama:** bu çerez kısa ömürlü ve Google onu giriş
+  anından birkaç saniye sonra set eder — "Girişi tamamladım" anında henüz
+  olmayabilir. Bu yüzden `loginBitir` çerez almadan önce Gemini'yi bir kez
+  taze yükleyip ~3.5 sn bekler ve **argümansız** `ctx.cookies()` ile tüm
+  domainlerin çerezlerini (HttpOnly dahil) alır. PSIDTS yoksa `.env`'e YAZILMAZ
+  (eski/boş değer köprüyü "cookies invalid" yapar) — kullanıcıya "birkaç saniye
+  bekle, tek Google hesabıyla gir, sonra tamamla" denir.
 Servisi adapter kendi başlatır (`tools/gemini-api-server` binary'si).
 - **Hazırlık `/health` değil model listesini bekler.** `/health` yalnız
   sürecin ayakta olduğunu söyler; çerez çürükse köprü ayaktadır ama Gemini'ye

@@ -172,11 +172,21 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
   const bul = (isim) => cerezler.find((c) => c.name === isim)?.value || null;
   const psid = bul('__Secure-1PSID');
   const psidts = bul('__Secure-1PSIDTS');
-  if (!psid || !psidts) {
+
+  if (!psid) {
+    const google = cerezler.filter((c) => /google/.test(c.domain || '')).map((c) => c.name);
     throw new Error(
-      'Gemini oturum çerezleri bulunamadı (__Secure-1PSID / __Secure-1PSIDTS). Tarayıcıda Gemini hesabına giriş yapıldığından emin ol.'
+      `Gemini oturumu bulunamadı (__Secure-1PSID yok). Tarayıcıda gemini.google.com'a giriş yapıldığından emin ol. Görülen Google çerezleri: ${google.slice(0, 8).join(', ') || 'hiç'}`
     );
   }
+  if (!psidts) {
+    // PSID var ama PSIDTS yok: çerez henüz olgunlaşmamış. Eski/boş PSIDTS'i
+    // .env'e YAZMA (köprü geçersiz görür) — kullanıcı biraz bekleyip yenilesin.
+    throw new Error(
+      '__Secure-1PSIDTS çerezi henüz oluşmamış. Açılan Gemini sekmesinde birkaç saniye bekle (bir mesaj yazıp gönder), SONRA "Girişi tamamladım"a bas. Tek Google hesabıyla giriş yaptığından emin ol.'
+    );
+  }
+  log.info(`[gemini-http] çerez alındı — ${hesap?.ad || 'varsayılan'}: PSID+PSIDTS var`);
 
   const dosya = envYolu(hesap);
   let icerik = fs.existsSync(dosya)
