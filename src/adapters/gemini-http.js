@@ -89,7 +89,9 @@ function envDegiskenleri(dosya) {
   if (!fs.existsSync(dosya)) return cikti;
   for (const satir of fs.readFileSync(dosya, 'utf8').split('\n')) {
     const m = satir.match(/^\s*(GEMINI_[A-Z0-9_]+)\s*=\s*(.*)$/);
-    if (m) cikti[m[1]] = m[2].trim();
+    // Yalnız DOLU değerleri al: boş değer OS env'e set olup köprünün
+    // .env'deki dolu değerini gölgeleyebiliyor.
+    if (m && m[2].trim()) cikti[m[1]] = m[2].trim();
   }
   return cikti;
 }
@@ -135,12 +137,23 @@ async function servisiBaslat(platform, hesap) {
     );
   }
 
-  log.info(`[gemini-http] köprü başlatılıyor — ${hesap?.ad || 'varsayılan'} (:${port})`);
+  const cerezEnv = envDegiskenleri(env);
+  // Teşhis: çerezlerin köprüye gerçekten enjekte edildiğini uzunlukla göster
+  // (değerin kendini değil). PSIDTS=0b ise .env'e yazılmamış demektir.
+  log.info(
+    `[gemini-http] köprü başlatılıyor — ${hesap?.ad || 'varsayılan'} (:${port}) ` +
+      `[PSID=${(cerezEnv.GEMINI_1PSID || '').length}b PSIDTS=${(cerezEnv.GEMINI_1PSIDTS || '').length}b]`
+  );
+  // Köprü cwd'deki düz `.env`'i de okuyabildiği için (godotenv), o dosya
+  // varsa YANLIŞ hesabın eski çerezini yükleyip bizim enjeksiyonu
+  // gölgeleyebilir. Köprü env'inde GEMINI_COOKIES'i de temizle ki karışmasın.
+  const temizProcessEnv = { ...process.env };
+  delete temizProcessEnv.GEMINI_1PSID;
+  delete temizProcessEnv.GEMINI_1PSIDTS;
+  delete temizProcessEnv.GEMINI_COOKIES;
   const surec = spawn(SERVIS_BINARY, [], {
     cwd: SERVIS_DIZINI,
-    // Çerezler ve PORT doğrudan env'e verilir: köprü cwd'deki düz `.env`'i
-    // okusa bile OS env öncelikli olur, hesaplar birbirine karışmaz.
-    env: { ...process.env, ...envDegiskenleri(env), PORT: port },
+    env: { ...temizProcessEnv, ...cerezEnv, PORT: port },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
