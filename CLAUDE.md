@@ -499,7 +499,9 @@ Job açılırken fotoğraf job klasörüne alınırken iki adımdan geçer
 (`girdiyiHazirla`, `src/varyant.js`):
 1. **EXIF yönü uygulanır** — telefon fotoğrafları çoğu zaman dönük saklanır;
    ham piksel boyutuna bakmadan önce bu düzeltilmeli.
-2. **Yatay ise saat yönünde 90° döndürülür** (`genişlik > yükseklik`).
+2. **Belirgin yatay ise saat yönünde 90° döndürülür** — genişlik/yükseklik
+   oranı `girdiYatayOrani` (varsayılan 1.2 = %20) eşiğini aşmalı; kareye yakın
+   fotoğraflar döndürülmez.
    Üretim her zaman dikey çerçeveden başlar.
 
 Sonuç `job.inputDonduruldu` / `job.inputBoyut` alanlarına yazılır, panelde
