@@ -138,11 +138,12 @@ async function servisiBaslat(platform, hesap) {
   }
 
   const cerezEnv = envDegiskenleri(env);
-  // Teşhis: çerezlerin köprüye gerçekten enjekte edildiğini uzunlukla göster
-  // (değerin kendini değil). PSIDTS=0b ise .env'e yazılmamış demektir.
+  // Teşhis: köprünün OKUDUĞU dosya yolu + enjekte edilen çerez uzunlukları.
+  // PSIDTS=0b ise ya dosya boş ya bu yol yazılan dosyadan farklı.
   log.info(
     `[gemini-http] köprü başlatılıyor — ${hesap?.ad || 'varsayılan'} (:${port}) ` +
-      `[PSID=${(cerezEnv.GEMINI_1PSID || '').length}b PSIDTS=${(cerezEnv.GEMINI_1PSIDTS || '').length}b]`
+      `okunan=${path.relative(ROOT, env)} [PSID=${(cerezEnv.GEMINI_1PSID || '').length}b ` +
+      `PSIDTS=${(cerezEnv.GEMINI_1PSIDTS || '').length}b]`
   );
   // Köprü cwd'deki düz `.env`'i de okuyabildiği için (godotenv), o dosya
   // varsa YANLIŞ hesabın eski çerezini yükleyip bizim enjeksiyonu
@@ -229,17 +230,24 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
     ? fs.readFileSync(dosya, 'utf8')
     : fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
   const port = portu(platform, hesap);
-  // Satır varsa değiştir, yoksa EKLE — aksi halde .env'de ilgili satır yoksa
-  // replace sessizce boş geçip çerez yazılmamış olur ("cookies invalid").
+  // Satır varsa değiştir, yoksa EKLE. replace'te FONKSIYON replacement kullan:
+  // string replacement'ta çerezdeki `$` (`$&`, `$1`…) özel yorumlanıp değeri
+  // bozabiliyor — fonksiyon dönüşü olduğu gibi yazılır.
   const ayarla = (metin, anahtar, deger) =>
     new RegExp(`^${anahtar}=.*$`, 'm').test(metin)
-      ? metin.replace(new RegExp(`^${anahtar}=.*$`, 'm'), `${anahtar}=${deger}`)
+      ? metin.replace(new RegExp(`^${anahtar}=.*$`, 'm'), () => `${anahtar}=${deger}`)
       : `${metin.trimEnd()}\n${anahtar}=${deger}\n`;
   icerik = ayarla(icerik, 'GEMINI_1PSID', psid);
   icerik = ayarla(icerik, 'GEMINI_1PSIDTS', psidts);
   icerik = ayarla(icerik, 'PORT', port);
   fs.writeFileSync(dosya, icerik);
-  log.ok(`[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} (${path.basename(dosya)})`);
+  // Yazdıktan HEMEN sonra geri oku — dosyaya gerçekten değer düştü mü?
+  const kontrol = envDegiskenleri(dosya);
+  log.ok(
+    `[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} ` +
+      `(${path.relative(ROOT, dosya)}) [PSID=${(kontrol.GEMINI_1PSID || '').length}b ` +
+      `PSIDTS=${(kontrol.GEMINI_1PSIDTS || '').length}b]`
+  );
 
   // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun. Windows'ta
   // SIGTERM her zaman anında öldürmüyor — portu tutanı da zorla kapat.
