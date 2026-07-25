@@ -1,0 +1,809 @@
+{
+  "id": "LA_FL",
+  "version": 3,
+  "thumbnail": "LA_FL.png",
+  "update": true,
+  "function": "LA",
+  "mediaTypeIdList": [],
+  "borderType": 0,
+  "paperSizeList": [
+    {
+      "paperSizeId": "LB",
+      "size": [
+        1332,
+        1912
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 20.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 126,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "2L",
+      "size": [
+        1872,
+        2634
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 29.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 180,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "HG",
+      "size": [
+        1489,
+        2210
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 24.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 141,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "KG",
+      "size": [
+        1512,
+        2272
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 25.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 144,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "S2",
+      "size": [
+        1872,
+        1912
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 180,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "A5",
+      "size": [
+        2170,
+        3088
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 209,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "A4",
+      "size": [
+        3048,
+        4321
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 297,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "A3",
+      "size": [
+        4281,
+        6065
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 68.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 420,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "6G",
+      "size": [
+        2952,
+        3712
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 288,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "S1",
+      "size": [
+        3048,
+        3088
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 297,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "A2",
+      "size": [
+        6025,
+        8531
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 595,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "HV",
+      "size": [
+        1512,
+        2672
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 144,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "5A",
+      "size": [
+        2170,
+        3088
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 209,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "CA",
+      "size": [
+        837,
+        1331
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 15.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 76,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "MS",
+      "size": [
+        852,
+        1402
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 15.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "S",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 78,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "3A",
+      "size": [
+        4735,
+        6958
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 68.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 466,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "4G",
+      "size": [
+        3672,
+        4432
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 360,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "LT",
+      "size": [
+        3132,
+        4072
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 45.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 306,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    },
+    {
+      "paperSizeId": "LG",
+      "size": [
+        3132,
+        5152
+      ],
+      "orientation": 0,
+      "topleft": [
+        -36,
+        -42
+      ],
+      "defaultAddTextFontSize": 48.0,
+      "backgroundData": {
+        "backgroundImage": "",
+        "backgroundPattern": {
+          "type": "C",
+          "size": "L",
+          "patternColor": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patternName": "",
+          "layout": "T",
+          "angle": 0.0,
+          "scale": 1.0,
+          "density": 50
+        }
+      },
+      "vergeData": {
+        "borderType": "BL",
+        "isEquablePhotoSize": true,
+        "defaultWidth": 42,
+        "maxWidth": 306,
+        "width": 42
+      },
+      "imageFrames": [],
+      "cliparts": [],
+      "messages": [],
+      "sender": {}
+    }
+  ]
+}
