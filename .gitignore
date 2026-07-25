@@ -27,3 +27,4 @@ jobs/.havuz.json
 
 .oturum-test.mjs
 .*-test.mjs
+config/settings.json

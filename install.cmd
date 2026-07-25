@@ -108,6 +108,9 @@ if errorlevel 1 (
 
 rem ------------------------------------------------- 5. Yapilandirma + kisayol
 echo   [5/7] Yapilandirma hazirlaniyor...
+if not exist config\settings.json (
+  if exist config\settings.example.json copy /y config\settings.example.json config\settings.json >nul
+)
 if not exist config\telegram.json (
   if exist config\telegram.example.json copy /y config\telegram.example.json config\telegram.json >nul
 )

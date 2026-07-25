@@ -17,15 +17,7 @@
       "concurrency": 4,
       "codexConfig": {
         "model_reasoning_effort": "low"
-      },
-      "hesaplar": [
-        {
-          "ad": "varsayılan"
-        },
-        {
-          "ad": "Olcay"
-        }
-      ]
+      }
     },
     "gemini": {
       "adapter": "gemini-http",
@@ -52,5 +44,6 @@
       "sendButton": "button[aria-label*=\"Gönder\"], button[aria-label*=\"Send\"], button.send-button",
       "resultImage": "generated-image img, img.image-item, model-response img[src^=\"blob:\"], model-response img[src^=\"https\"]"
     }
-  }
+  },
+  "_": "Bu sablondan config/settings.json olusturulur (install/ilk acilista kopyalanir). Hesaplari panelden Oturumlar > + Hesap ekle ile eklersin; gercek settings.json git-disidir."
 }

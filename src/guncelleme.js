@@ -123,9 +123,29 @@ export async function guncellemeVarMi({ zorla = false } = {}) {
  * Güncellemeyi uygular. Yerel değişiklik varsa dokunmaz — kullanıcının
  * elindeki kurulumu sessizce ezmek en kötü senaryodur.
  */
+// Panelin runtime'da yazdığı kullanıcı-verisi dosyaları. Eskiden yanlışlıkla
+// git-takipliydiler; panel onları değiştirince "kirli ağaç" güncellemeyi
+// blokluyordu. Artık takip dışı — hâlâ takipli bir kopya varsa güncelleme
+// öncesi index'ten düşürülür (working tree korunur), böylece bir kez otomatik
+// onarılır ve bir daha bloke etmez.
+const KULLANICI_DOSYALARI = ['config/settings.json', 'config/prompts.json', 'config/telegram.json'];
+
+async function takipliKullaniciDosyalariniDusur() {
+  for (const dosya of KULLANICI_DOSYALARI) {
+    try {
+      await git('ls-files', '--error-unmatch', dosya); // takipli mi?
+      await git('rm', '--cached', '-q', dosya); // içeriği koruyarak takipten çıkar
+    } catch {
+      /* takipli değil — sorun yok */
+    }
+  }
+}
+
 export async function guncelle() {
   if (!(await depoMu())) throw new Error('Bu kurulum git deposu değil; güncelleme yapılamaz.');
   const dal = guncellemeAyarlari().dal;
+
+  await takipliKullaniciDosyalariniDusur();
 
   const kirli = await git('status', '--porcelain');
   if (kirli) {
