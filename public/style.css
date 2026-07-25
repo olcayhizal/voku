@@ -299,6 +299,9 @@ h3 {
 .hesap-kart .oturum-eylem { margin-top: 8px; }
 .btn-ekle.btn-kucuk { padding: 5px 10px; font-size: 12px; }
 
+/* Limit bekleyen kare: reset saatinde otomatik sürecek */
+.kare-limit { color: var(--safelight); }
+
 /* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
 .lamba-link {
   margin-left: 5px;

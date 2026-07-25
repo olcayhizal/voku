@@ -25,7 +25,7 @@ import { adaptorAl } from './adapters/index.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
-import { havuzOzeti } from './havuz.js';
+import { havuzOzeti, uygunHesapVar } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
 
@@ -102,6 +102,9 @@ function jobOzet(job) {
       attempts: t.attempts,
       files: t.files,
       error: t.error,
+      hesap: t.hesap || null,
+      limitBekliyor: Boolean(t.limitBekliyor),
+      limitAcilis: t.limitAcilis || null,
       varyantVar: taskVaryantDurumu(job, t),
       baski: (t.files || []).map((d) => baskiKaydi(job, d)),
     })),
@@ -798,6 +801,33 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     }
   });
 
+  // --- Limit bekçisi ---
+  // Tüm hesapları limitte olduğu için pending kalan işler, reset saati gelince
+  // "Başlat"ı beklemesin: bekçi periyodik bakar, o platformda uygun hesap
+  // açıldıysa işi kendiliğinden başlatır. Kota yeniden dolarsa runner yine
+  // pending bırakır, bir sonraki turda tekrar denenir (sonsuz döngü yok:
+  // yalnız uygun hesap VARKEN başlatılır).
+  const bekci = setInterval(() => {
+    for (const job of jobListele()) {
+      if (durum.kosanJoblar.has(job.id)) continue;
+      const platformlar = new Set(
+        job.tasks
+          .filter((t) => t.status === 'pending' && t.limitBekliyor)
+          .map((t) => t.platform)
+      );
+      if (!platformlar.size) continue;
+      const acilan = [...platformlar].some((pAd) => {
+        const plt = ayarlar.platforms[pAd];
+        return plt && plt.enabled !== false && uygunHesapVar(pAd, plt.hesaplar || []);
+      });
+      if (acilan) {
+        log.ok(`${job.id}: limit penceresi açıldı — otomatik sürdürülüyor`);
+        jobuArkaPlandaCalistir(job, ayarlar);
+      }
+    }
+  }, 60000);
+  bekci.unref?.();
+
   sunucu.listen(port, '127.0.0.1', () => {
     const adres = `http://127.0.0.1:${port}`;
     log.ok(`Panel açık: ${adres}`);
@@ -807,6 +837,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   });
 
   const kapat = async () => {
+    clearInterval(bekci);
     if (durum.telegram) durum.telegram.durdur();
     // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
     try {

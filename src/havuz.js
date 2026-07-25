@@ -122,6 +122,11 @@ export function enErkenAcilis(platformAdi, hesaplar) {
   return enErken;
 }
 
+/** O platformda şu an kiralanabilir (dinlenmede olmayan) hesap var mı? */
+export function uygunHesapVar(platformAdi, hesaplar) {
+  return enErkenAcilis(platformAdi, hesaplar) === null;
+}
+
 /** Panel için: her hesabın anlık durumu. */
 export function havuzOzeti(platformAdi, hesaplar) {
   return hesaplar.map((h) => {

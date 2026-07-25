@@ -140,7 +140,14 @@ pencerede aynı anda doldurup birlikte kilitler).
   **kota** hatası alınca (`e.limitDolu`) hesap dinlenmeye alınır, **deneme
   harcanmadan** başka hesaba geçilir. Gerçek üretim hatası normal retry.
   Tüm hesaplar limitteyse ve en erken açılış 8 dk'dan uzaksa task `pending`
-  kalır (kaybolmaz, kullanıcı sonra başlatır); yakınsa worker bekler.
+  kalır (`limitBekliyor` işaretiyle) ve **limit bekçisi** reset saatinde işi
+  kendiliğinden sürdürür — "Başlat"a gerek yok; yakınsa worker yerinde bekler.
+- **Limit bekçisi** (`server.js`, 60 sn'de bir): `limitBekliyor` pending
+  task'ı olan koşmayan işleri tarar; o platformda uygun hesap açıldıysa
+  (`havuz.uygunHesapVar`) işi otomatik başlatır. Sonsuz döngü yok — yalnız
+  uygun hesap VARKEN başlatılır; kota yeniden dolarsa runner tekrar bekletir.
+  Panelde kare "limitte · HH:MM'de otomatik sürecek" gösterir. Bekçi panel
+  süreciyle yaşar (kontrol paneli 7/24 açık).
 - **Limit tespiti:** Codex çıktısından `chatgpt-codex > limitHatasiCoz`
   (ISO `resets_at`, "in 3h 20m", "at 6:34 AM"); Gemini köprüsünde 429 /
   "quota|resource exhausted". Reset okunamazsa muhafazakâr 1 saat cooldown.

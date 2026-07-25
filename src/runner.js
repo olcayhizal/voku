@@ -45,7 +45,10 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       const kalan = erken - Date.now();
       if (kalan > HESAP_BEKLEME_ESIGI) {
         task.status = 'pending';
-        task.error = `Tüm ${platformAdi} hesapları limitte — ${saatEtiketi(erken)}'de açılacak, iş bekliyor.`;
+        task.error = `Tüm ${platformAdi} hesapları limitte — ${saatEtiketi(erken)}'de otomatik sürecek.`;
+        // Bekçi (server) bu işareti görüp reset olunca işi kendiliğinden başlatır.
+        task.limitBekliyor = true;
+        task.limitAcilis = erken;
         jobYaz(job);
         manifestYaz(job);
         log.warn(`[${platformAdi}] ${task.id} bekletildi — hesaplar ${saatEtiketi(erken)}'e kadar limitte`);
@@ -70,12 +73,14 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       }
     }
 
-    // 3) Üret.
+    // 3) Üret. Uygun hesap bulundu — limit-bekleme işareti temizlenir.
     task.attempts += 1;
     task.status = 'running';
     task.startedAt = new Date().toISOString();
     task.error = null;
     task.hesap = hesap.ad;
+    task.limitBekliyor = false;
+    task.limitAcilis = null;
     jobYaz(job);
 
     try {

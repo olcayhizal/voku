@@ -631,14 +631,18 @@ function jobDetayCiz() {
       ),
       el('div', { class: 'kare-durum' },
         el('span', {
+          class: t.limitBekliyor ? 'kare-limit' : '',
           text:
-            t.status === 'done' && !dosyaHazirMi(t)
-              // Demo/baskı üretimden sonra basılır (bir an gecikebilir); ham
-              // üretimde ise ara durum yoktur — dosya yoksa gelmeyecek demektir.
-              ? dosyaVaryanti === 'uretim'
-                ? 'dosya bulunamadı — yenile'
-                : `${secili.etiket.toLocaleLowerCase('tr')} hazırlanıyor`
-              : `${DURUM_ETIKET[t.status]}${t.attempts > 1 ? ` · ${t.attempts}. deneme` : ''}`,
+            // Tüm hesaplar limitte: reset saatinde bekçi otomatik sürdürecek.
+            t.limitBekliyor
+              ? `limitte · ${saatKisa(t.limitAcilis)}'de otomatik sürecek`
+              : t.status === 'done' && !dosyaHazirMi(t)
+                // Demo/baskı üretimden sonra basılır (bir an gecikebilir); ham
+                // üretimde ise ara durum yoktur — dosya yoksa gelmeyecek demektir.
+                ? dosyaVaryanti === 'uretim'
+                  ? 'dosya bulunamadı — yenile'
+                  : `${secili.etiket.toLocaleLowerCase('tr')} hazırlanıyor`
+                : `${DURUM_ETIKET[t.status]}${t.attempts > 1 ? ` · ${t.attempts}. deneme` : ''}`,
         }),
         state.varyant === 'baski' && t.status === 'done' && dosyaHazirMi(t)
           ? bilgi.secili
