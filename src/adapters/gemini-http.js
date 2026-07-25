@@ -83,15 +83,21 @@ async function modelListesi(port, timeoutMs = 2500) {
   }
 }
 
-/** `.env` dosyasını okuyup GEMINI_* değişkenlerini env objesine çıkarır. */
+/**
+ * `.env` dosyasını okuyup GEMINI_* değişkenlerini env objesine çıkarır.
+ * Regex yerine indexOf('=') + `\r?\n` bölme: Windows CRLF ve değer içindeki
+ * `=` / özel karakterlere karşı dayanıklı. Yalnız DOLU değerler alınır (boş
+ * değer OS env'e set olup köprünün gerçek çerezini gölgeleyebilir).
+ */
 function envDegiskenleri(dosya) {
   const cikti = {};
   if (!fs.existsSync(dosya)) return cikti;
-  for (const satir of fs.readFileSync(dosya, 'utf8').split('\n')) {
-    const m = satir.match(/^\s*(GEMINI_[A-Z0-9_]+)\s*=\s*(.*)$/);
-    // Yalnız DOLU değerleri al: boş değer OS env'e set olup köprünün
-    // .env'deki dolu değerini gölgeleyebiliyor.
-    if (m && m[2].trim()) cikti[m[1]] = m[2].trim();
+  for (const satir of fs.readFileSync(dosya, 'utf8').split(/\r?\n/)) {
+    const i = satir.indexOf('=');
+    if (i < 0) continue;
+    const anahtar = satir.slice(0, i).trim();
+    const deger = satir.slice(i + 1).trim();
+    if (/^GEMINI_[A-Z0-9_]+$/.test(anahtar) && deger) cikti[anahtar] = deger;
   }
   return cikti;
 }
@@ -226,20 +232,19 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
   log.info(`[gemini-http] çerez alındı — ${hesap?.ad || 'varsayılan'}: PSID+PSIDTS var`);
 
   const dosya = envYolu(hesap);
-  let icerik = fs.existsSync(dosya)
-    ? fs.readFileSync(dosya, 'utf8')
-    : fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
   const port = portu(platform, hesap);
-  // Satır varsa değiştir, yoksa EKLE. replace'te FONKSIYON replacement kullan:
-  // string replacement'ta çerezdeki `$` (`$&`, `$1`…) özel yorumlanıp değeri
-  // bozabiliyor — fonksiyon dönüşü olduğu gibi yazılır.
-  const ayarla = (metin, anahtar, deger) =>
-    new RegExp(`^${anahtar}=.*$`, 'm').test(metin)
-      ? metin.replace(new RegExp(`^${anahtar}=.*$`, 'm'), () => `${anahtar}=${deger}`)
-      : `${metin.trimEnd()}\n${anahtar}=${deger}\n`;
-  icerik = ayarla(icerik, 'GEMINI_1PSID', psid);
-  icerik = ayarla(icerik, 'GEMINI_1PSIDTS', psidts);
-  icerik = ayarla(icerik, 'PORT', port);
+  // Regex-replace'ten VAZGEÇİLDİ (Windows CRLF + değerdeki özel karakterlerde
+  // sessizce başarısız oluyordu). Bunun yerine: taban içeriği al, kritik
+  // satırları (PORT/PSID/PSIDTS) SATIR SATIR çıkar, taze değerleri sona ekle.
+  let taban = '';
+  if (fs.existsSync(dosya)) taban = fs.readFileSync(dosya, 'utf8');
+  else if (fs.existsSync(path.join(SERVIS_DIZINI, '.env.example')))
+    taban = fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
+  const korunan = taban
+    .split(/\r?\n/)
+    .filter((l) => l.trim() && !/^\s*(PORT|GEMINI_1PSID|GEMINI_1PSIDTS)\s*=/.test(l));
+  const icerik =
+    [...korunan, `PORT=${port}`, `GEMINI_1PSID=${psid}`, `GEMINI_1PSIDTS=${psidts}`].join('\n') + '\n';
   fs.writeFileSync(dosya, icerik);
   // Yazdıktan HEMEN sonra geri oku — dosyaya gerçekten değer düştü mü?
   const kontrol = envDegiskenleri(dosya);
