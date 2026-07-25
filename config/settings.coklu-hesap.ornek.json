@@ -1,0 +1,44 @@
+{
+  "_": "Çoklu hesap havuzu örneği. config/settings.json'daki platforms.<ad>.hesaplar listesini bunun gibi doldur; sonra her hesaba ayrı giriş yap: node src/cli.js login chatgpt --hesap onur",
+
+  "headless": false,
+  "channel": "chrome",
+  "maxAttempts": 3,
+  "retryBackoffMs": 5000,
+  "generationTimeoutMs": 420000,
+  "parallelPlatforms": true,
+  "concurrency": 3,
+
+  "platforms": {
+    "chatgpt": {
+      "adapter": "chatgpt-codex",
+      "url": "https://chatgpt.com/",
+      "enabled": true,
+      "concurrency": 4,
+      "codexConfig": { "model_reasoning_effort": "low" },
+
+      "_hesaplar": "Her hesap ayrı CODEX_HOME (ChatGPT oturumu orada izole). codexHome vermezsen .profiles/chatgpt-<ad>/.codex kullanılır. concurrency hesaba özel olabilir.",
+      "hesaplar": [
+        { "ad": "olcay" },
+        { "ad": "onur" }
+      ]
+    },
+
+    "gemini": {
+      "adapter": "gemini-http",
+      "url": "https://gemini.google.com/app",
+      "model": "gemini-3-pro-image",
+      "enabled": true,
+      "concurrency": 4,
+      "watermarkKaldir": true,
+
+      "_hesaplar": "Her hesap ayrı köprü portu + ayrı .env.<envAdi> + ayrı tarayıcı profili (farklı Google hesabı). port/envAdi/profileDir vermezsen otomatik atanır (4981'den artan port).",
+      "hesaplar": [
+        { "ad": "olcay" },
+        { "ad": "onur" }
+      ]
+    }
+  },
+
+  "selectors": {}
+}

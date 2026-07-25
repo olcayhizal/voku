@@ -50,11 +50,60 @@ function codexCalistir(argumanlar, secenekler) {
   return komutCalistir(komut, [...onEk, ...argumanlar], secenekler);
 }
 
-function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin } = {}) {
+/**
+ * Codex çıktısından kullanım limiti hatası + reset zamanı çıkarır.
+ * Codex limite çarpınca "usage limit reached … try again at 6:34 AM" ya da
+ * "resets in 4h" gibi metin döndürüyor. Reset okunabilirse ms epoch,
+ * okunamıyorsa null (havuz muhafazakâr varsayılan cooldown uygular).
+ */
+export function limitHatasiCoz(metin) {
+  const m = String(metin || '');
+  if (!/usage limit|rate limit|too many requests|quota|429|limit reached/i.test(m)) return null;
+  return { limitDolu: true, resetsAt: resetZamaniCoz(m) };
+}
+
+/** Metinden reset zamanını (ms epoch) çıkarır; okunamazsa null. */
+export function resetZamaniCoz(m) {
+  // 1) ISO zaman damgası — Codex protokolünün resets_at'i (en güvenilir).
+  const iso = m.match(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/);
+  if (iso) {
+    const t = Date.parse(iso[1]);
+    if (!Number.isNaN(t) && t > Date.now()) return t;
+  }
+  // 2) Göreli süre: "in 4 days 2 hours 46 minutes", "resets in 3h 20m".
+  const rel = m.match(/\b(?:in|resets?\s+in|try\s+again\s+in)\s+([\dhmds\s,]+?)(?:[.)\]]|$|\.\s)/i);
+  if (rel) {
+    const g = rel[1];
+    const d = /(\d+)\s*(?:d\b|day)/i.exec(g);
+    const h = /(\d+)\s*(?:h\b|hour)/i.exec(g);
+    const dk = /(\d+)\s*(?:m\b|min)/i.exec(g);
+    const ms =
+      ((d ? +d[1] : 0) * 86400 + (h ? +h[1] : 0) * 3600 + (dk ? +dk[1] : 0) * 60) * 1000;
+    if (ms > 0) return Date.now() + ms;
+  }
+  // 3) Saat: "try again at 6:34 AM" — bugünün o saati, geçmişse yarın.
+  const saat = m.match(/(?:again|reset)\D{0,12}?\bat\s+(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if (saat) {
+    const s = new Date();
+    let sa = +saat[1];
+    if (saat[3]) {
+      const pm = /pm/i.test(saat[3]);
+      if (pm && sa < 12) sa += 12;
+      if (!pm && sa === 12) sa = 0;
+    }
+    s.setHours(sa, +saat[2], 0, 0);
+    if (s.getTime() <= Date.now()) s.setDate(s.getDate() + 1);
+    return s.getTime();
+  }
+  return null;
+}
+
+function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin, codexHome } = {}) {
   return new Promise((cozumle, reddet) => {
     const surec = spawn(komut, argumanlar, {
       cwd,
-      env: process.env,
+      // Her hesap ayrı CODEX_HOME: auth.json ve generated_images orada izole.
+      env: codexHome ? { ...process.env, CODEX_HOME: codexHome } : process.env,
       stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     if (stdin !== undefined) {
@@ -90,6 +139,15 @@ function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin } = {}
     });
     surec.on('close', (kod) => {
       if (sayac) clearTimeout(sayac);
+      // Limit dolduysa çıkış kodu 0 olsa bile (Codex bazen 0 döndürüp metinde
+      // söylüyor) havuzun tanıyabileceği özel hata fırlat.
+      const limit = limitHatasiCoz(hata + '\n' + cikti);
+      if (limit) {
+        const e = new Error(`Codex kullanım limiti doldu${limit.resetsAt ? '' : ' (reset zamanı okunamadı)'}.`);
+        e.limitDolu = true;
+        e.resetsAt = limit.resetsAt;
+        return reddet(e);
+      }
       if (kod !== 0) {
         const son = (hata || cikti).trim().split('\n').slice(-4).join(' ');
         return reddet(new Error(`Codex çıkış kodu ${kod}: ${son || 'çıktı yok'}`));
@@ -99,8 +157,8 @@ function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin } = {}
   });
 }
 
-function codexKoku() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+function codexKoku(hesap) {
+  return hesap?.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
 /**
@@ -110,13 +168,16 @@ function codexKoku() {
  */
 export const girisTipi = 'surec';
 
-export function girisKomutu(platform) {
+export function girisKomutu(platform, hesap) {
   const { komut, onEk } = codexCagrisi();
   const argumanlar = [...onEk, 'login'];
   if (platform?.deviceAuth) argumanlar.push('--device-auth');
   return {
     komut,
     argumanlar,
+    // Her hesap ayrı CODEX_HOME'a giriş yapar; süreci başlatan taraf bu env'i
+    // uygular (server.js). Kart ipucu hesap adını da içerir.
+    env: hesap?.codexHome ? { CODEX_HOME: hesap.codexHome } : null,
     ipucu: platform?.deviceAuth
       ? 'Ekranda çıkan kodu chatgpt.com/device adresine gir.'
       : 'Sistem tarayıcında ChatGPT giriş sayfası açılacak. Giriş bitince bu kart kendiliğinden yeşile döner.',
@@ -124,17 +185,17 @@ export function girisKomutu(platform) {
 }
 
 /** Panelin kart durumu için ucuz, senkron bakış (doğrulama ayrıca koşar). */
-export function girisDurumu() {
-  const dosya = path.join(codexKoku(), 'auth.json');
+export function girisDurumu(platform, hesap) {
+  const dosya = path.join(codexKoku(hesap), 'auth.json');
   if (!fs.existsSync(dosya)) return { profilVar: false, sonGiris: null };
   return { profilVar: true, sonGiris: fs.statSync(dosya).mtime.toISOString() };
 }
 
 /** Codex kurulu ve ChatGPT hesabıyla giriş yapılmış mı? */
-export async function hazirla() {
+export async function hazirla(_page, _platform, _sel, _ayarlar, hesap) {
   let durum;
   try {
-    durum = await codexCalistir(['login', 'status'], { timeoutMs: 30000 });
+    durum = await codexCalistir(['login', 'status'], { timeoutMs: 30000, codexHome: codexKoku(hesap) });
   } catch (e) {
     if (/ENOENT|çalıştırılamadı/.test(e.message)) {
       throw new Error(
@@ -173,8 +234,8 @@ function gorselDosyalari(klasor) {
 }
 
 /** Codex'in kendi çıktı klasöründe bırakılmış son görselleri toplar (yedek yol). */
-function codexCiktilari(baslangicZamani) {
-  const kok = path.join(codexKoku(), 'generated_images');
+function codexCiktilari(baslangicZamani, hesap) {
+  const kok = path.join(codexKoku(hesap), 'generated_images');
   if (!fs.existsSync(kok)) return [];
   const bulunan = [];
   const tara = (dizin, derinlik = 0) => {
@@ -192,11 +253,12 @@ function codexCiktilari(baslangicZamani) {
   return bulunan.sort((a, b) => a.zaman - b.zaman).map((x) => x.yol);
 }
 
-export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal }) {
+export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }) {
   fs.mkdirSync(outDir, { recursive: true });
   const oncesi = gorselDosyalari(outDir);
   const baslangic = Date.now() - 1000;
   const hedef = path.join(outDir, `${baseName}.png`);
+  const codexHome = codexKoku(hesap);
 
   const gorev = [
     'Görsel üret. Kod yazma, dosya analizi yapma, açıklama yapma — sadece görsel üretimi.',
@@ -243,15 +305,18 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
       try {
         ham = await codexCalistir(
           [...argumanlar, '--output-schema', semaDosyasi, '-'],
-          { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev }
+          { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
         );
       } catch (e) {
+        // Limit hatasını YUTMA — şemasız tekrar aynı hesapta yine dolu döner.
+        if (e.limitDolu) throw e;
         if (!/text\.format\.schema|output.?schema|400/i.test(e.message)) throw e;
         ham = await codexCalistir([...argumanlar, '-'], {
           timeoutMs: zamanAsimi,
           cwd: outDir,
           signal,
           stdin: gorev,
+          codexHome,
         });
       }
     } else {
@@ -260,6 +325,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
         cwd: outDir,
         signal,
         stdin: gorev,
+        codexHome,
       });
     }
   } finally {
@@ -289,7 +355,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   // 3) Codex kendi klasörüne bırakıp kopyalamadıysa oradan al
   if (!yollar.size) {
-    const kalanlar = codexCiktilari(baslangic);
+    const kalanlar = codexCiktilari(baslangic, hesap);
     kalanlar.forEach((kaynak, i) => {
       const ek = kalanlar.length > 1 ? `-${i + 1}` : '';
       const varis = path.join(outDir, `${baseName}${ek}${path.extname(kaynak) || '.png'}`);

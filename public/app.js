@@ -94,6 +94,22 @@ function tarih(iso) {
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** Bar lambası için havuz özeti — çoklu hesaptaysa "2 hesap · 1 dinlenmede". */
+function havuzTooltip(p) {
+  const h = p.hesaplar || [];
+  if (h.length < 2) return null;
+  const dinlenen = h.filter((x) => x.dinlenmede).length;
+  return `${h.length} hesap havuzu` + (dinlenen ? ` · ${dinlenen} limitte` : ' · hepsi hazır');
+}
+
+/** ms epoch → "14:30" (havuz reset saati). */
+function saatKisa(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function el(etiket, ozellik = {}, ...cocuklar) {
   const n = document.createElement(etiket);
   for (const [k, v] of Object.entries(ozellik)) {
@@ -1070,6 +1086,26 @@ function oturumlariCiz() {
       el('div', { class: 'oturum-satir', text: p.girisTipi === 'surec' ? `sürücü: ${p.adapter} · codex login` : p.url }),
       el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(p.sonGiris)}` }),
       p.dogrulama ? el('div', { class: 'oturum-satir', text: p.dogrulama.mesaj }) : null,
+      // Çoklu hesap havuzu: her hesabın anlık durumu (aktif / dinlenmede).
+      (p.hesaplar || []).length > 1
+        ? el('div', { class: 'havuz-durum' },
+            el('div', { class: 'oturum-satir', text: `${p.hesaplar.length} hesap havuzu` }),
+            ...p.hesaplar.map((h) =>
+              el('div', { class: `havuz-hesap${h.dinlenmede ? ' dinlenmede' : ''}` },
+                el('span', { class: 'havuz-nokta' }),
+                el('span', { class: 'havuz-ad', text: h.ad }),
+                el('span', {
+                  class: 'havuz-bilgi',
+                  text: h.dinlenmede
+                    ? `limitte · ${saatKisa(h.dinlenmeSonu)}'e kadar`
+                    : h.aktifSlot > 0
+                      ? `çalışıyor (${h.aktifSlot}/${h.kapasite})`
+                      : 'hazır',
+                })
+              )
+            )
+          )
+        : null,
       el('div', { class: 'oturum-eylem' },
         p.girisSuruyor
           ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Vazgeç', onclick: () => girisIptal(p.ad) })
@@ -1122,7 +1158,7 @@ function oturumlariCiz() {
     ...state.platformlar.map((p) =>
       el('span', {
         class: `oturum-lamba ${oturumSinifi(p) === 'acik' ? 'acik' : oturumSinifi(p) === 'kapali' ? 'kapali' : ''}`,
-        title: p.dogrulama?.mesaj || (p.profilVar ? 'Profil var, henüz sınanmadı' : 'Giriş yapılmadı'),
+        title: havuzTooltip(p) || p.dogrulama?.mesaj || (p.profilVar ? 'Profil var, henüz sınanmadı' : 'Giriş yapılmadı'),
       },
         el('i'),
         PLATFORM_ETIKET[p.ad] || p.ad

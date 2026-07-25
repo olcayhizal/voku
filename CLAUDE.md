@@ -117,6 +117,39 @@ Bir adapter "klasörde beliren yeni dosya benimdir" derse paralel koşan
 başka platformun çıktısını sahiplenir — dosya eşleştirmesi **`baseName`
 öneki** ile yapılır.
 
+## Çoklu hesap havuzu (failover)
+ChatGPT ve Gemini hesap limitlerini pencere bazlı ve **bağımsız** yeniliyor
+(Codex limit dolunca `resets_at` veriyor). Bu yüzden strateji **round-robin
+değil, limit-farkındalıklı failover**: bir hesabı sonuna kadar kullan, dolunca
+`resets_at`'e göre dinlenmeye al, sıradaki taze hesaba geç. İlk hesabın
+penceresi sen ötekileri tüketirken zaten yenilenmeye başlar — pencereli
+limitlerde sürekli throughput'u bu maksimize eder (round-robin hepsini aynı
+pencerede aynı anda doldurup birlikte kilitler).
+
+- **Tanım:** `settings.json > platforms.<ad>.hesaplar: [{ad}, ...]`
+  (örnek: `config/settings.coklu-hesap.ornek.json`). Liste yoksa tek hesap —
+  eski ayarlar aynen çalışır (`config.js > hesaplariNormalize`).
+- **İzolasyon:** ChatGPT hesabı ayrı `CODEX_HOME` (`.profiles/chatgpt-<ad>/.codex`,
+  auth + generated_images orada); Gemini hesabı ayrı köprü **portu** +
+  ayrı `.env.<ad>` + ayrı tarayıcı profili (farklı Google oturumu).
+- **Havuz** (`src/havuz.js`): her hesap `concurrency` kadar slot. `kirala()`
+  failover sırasıyla ilk uygun (dinlenmede olmayan, boş slotlu) hesabı verir;
+  `dinlenmeyeAl()` limitte olanı `resets_at`'e kadar kapatır; cooldown diske
+  yazılır (`jobs/.havuz.json`) — panel yeniden başlasa da boşuna limit yenmez.
+- **Runner** (`havuzluKuyruk`): worker sayısı = Σ hesap slotu. Bir task
+  **kota** hatası alınca (`e.limitDolu`) hesap dinlenmeye alınır, **deneme
+  harcanmadan** başka hesaba geçilir. Gerçek üretim hatası normal retry.
+  Tüm hesaplar limitteyse ve en erken açılış 8 dk'dan uzaksa task `pending`
+  kalır (kaybolmaz, kullanıcı sonra başlatır); yakınsa worker bekler.
+- **Limit tespiti:** Codex çıktısından `chatgpt-codex > limitHatasiCoz`
+  (ISO `resets_at`, "in 3h 20m", "at 6:34 AM"); Gemini köprüsünde 429 /
+  "quota|resource exhausted". Reset okunamazsa muhafazakâr 1 saat cooldown.
+- **Giriş:** her hesaba ayrı — `node src/cli.js login chatgpt --hesap onur`
+  (Codex: o hesabın CODEX_HOME'una `codex login`). Panelde oturum kartında
+  her hesabın durumu (aktif / dinlenmede N'e kadar), bar lambası tooltip'inde
+  özet. *(Panelden hesap-başına giriş düğmeleri henüz yok — hesaplar
+  settings.json'da tanımlanır, giriş şimdilik CLI'dan.)*
+
 ## İş kaynakları: panel / telegram
 Her job bir **kaynak** taşır (`job.kaynak`, manifest'te de var):
 

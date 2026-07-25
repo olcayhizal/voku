@@ -28,8 +28,72 @@ export function ayarlariYukle(dosya) {
         ? plt.profileDir
         : path.join(ROOT, plt.profileDir);
     }
+    plt.hesaplar = hesaplariNormalize(plt);
   }
   return s;
+}
+
+/**
+ * Bir platformun hesap listesini üretir. `hesaplar` tanımlıysa çoklu havuz;
+ * yoksa mevcut tek-hesap ayarları tek elemanlı listeye sarılır (geriye uyum —
+ * eski settings.json'lar aynen çalışır).
+ *
+ * ChatGPT hesabı: `{ ad, codexHome }` — Codex oturumu (`auth.json`) bu dizinde;
+ * yol köke göre mutlaklaştırılır, boşsa Codex'in kendi varsayılanı kullanılır.
+ * Gemini hesabı: `{ ad, port, envAdi }` — her hesap ayrı köprü portu ve ayrı
+ * `.env.<envAdi>` (çerezleri farklı Google hesabından).
+ */
+function hesaplariNormalize(plt) {
+  const cocuk = Array.isArray(plt.hesaplar) && plt.hesaplar.length ? plt.hesaplar : null;
+  const varsayilanCon = plt.concurrency;
+
+  if (!cocuk) {
+    // Tek hesap — mevcut alanlardan türetilir.
+    const tek = { ad: 'varsayılan', concurrency: varsayilanCon };
+    if (plt.adapter === 'gemini-http') {
+      tek.port = portCikar(plt.baseUrl);
+      tek.envAdi = null; // köprü dizinindeki düz `.env`
+      tek.profileDir = plt.profileDir || null; // mevcut tek profil
+    } else {
+      tek.codexHome = plt.codexHome ? mutlak(plt.codexHome) : null;
+    }
+    return [tek];
+  }
+
+  let sonrakiPort = 4981;
+  return cocuk.map((h, i) => {
+    const ad = String(h.ad || `hesap-${i + 1}`);
+    const con = Number(h.concurrency) > 0 ? Number(h.concurrency) : varsayilanCon;
+    if (plt.adapter === 'gemini-http') {
+      const port = Number(h.port) || sonrakiPort;
+      sonrakiPort = port + 1;
+      // Her Gemini hesabı ayrı Google oturumu → ayrı tarayıcı profili.
+      return {
+        ad,
+        concurrency: con,
+        port,
+        envAdi: h.envAdi || ad,
+        profileDir: mutlak(h.profileDir || path.join('.profiles', `gemini-${ad}`)),
+      };
+    }
+    return {
+      ad,
+      concurrency: con,
+      codexHome: mutlak(h.codexHome || path.join('.profiles', `chatgpt-${ad}`, '.codex')),
+    };
+  });
+}
+
+function mutlak(p) {
+  return path.isAbsolute(p) ? p : path.join(ROOT, p);
+}
+
+function portCikar(baseUrl) {
+  try {
+    return Number(new URL(baseUrl || 'http://127.0.0.1:4981').port) || 4981;
+  } catch {
+    return 4981;
+  }
 }
 
 /**

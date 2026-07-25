@@ -2,7 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 import { ayarlariYukle, promptlariYukle } from './config.js';
+import { adaptorAl } from './adapters/index.js';
 import { jobOlustur } from './job.js';
 import {
   jobOku,
@@ -38,7 +40,9 @@ function yardim() {
 voku — fotoğraftan ChatGPT + Gemini üyelikleri üzerinden görsel üretim hattı
 
 KOMUTLAR
-  login <platform>              Platforma elle giriş yap (oturum profile kaydedilir)
+  login <platform> [--hesap <ad>]
+                                Platforma giriş yap. Çoklu hesap havuzunda
+                                --hesap ile hangi hesap (settings.json'daki ad).
                                   platform: chatgpt | gemini
 
   new --image <yol> [--phone <no>] [--prompts <dosya>] [--note <metin>] [--run]
@@ -93,20 +97,69 @@ async function enterBekle(mesaj) {
   rl.close();
 }
 
-async function komutLogin(pozisyonel, ayarlar) {
+async function komutLogin(pozisyonel, opsiyon, ayarlar) {
   const ad = pozisyonel[0];
   const platform = ayarlar.platforms[ad];
   if (!platform) {
     log.err(`Bilinmeyen platform: ${ad}. Tanımlı: ${Object.keys(ayarlar.platforms).join(', ')}`);
     process.exit(1);
   }
-  log.info(`${ad} açılıyor — tarayıcıda giriş yap, sonra buraya dön.`);
-  const ctx = await contextAc(platform, ayarlar, { headless: false });
+
+  // Çoklu hesap: --hesap ile hangi hesaba giriş yapılacağı seçilir.
+  const hesaplar = platform.hesaplar || [];
+  const hesapAd = opsiyon.hesap === true ? null : opsiyon.hesap;
+  let hesap;
+  if (hesapAd) {
+    hesap = hesaplar.find((h) => h.ad === hesapAd);
+    if (!hesap) {
+      log.err(`"${ad}" için "${hesapAd}" hesabı yok. Tanımlı: ${hesaplar.map((h) => h.ad).join(', ')}`);
+      log.info('Yeni hesap: config/settings.json > platforms.' + ad + '.hesaplar listesine ekle.');
+      process.exit(1);
+    }
+  } else if (hesaplar.length > 1) {
+    log.err(`"${ad}" çok hesaplı — hangisi? --hesap <ad> ver. Tanımlı: ${hesaplar.map((h) => h.ad).join(', ')}`);
+    process.exit(1);
+  } else {
+    hesap = hesaplar[0];
+  }
+
+  const adaptor = adaptorAl(platform.adapter || ad);
+
+  // Codex (süreçli giriş): CODEX_HOME hesabınkine ayarlanıp `codex login` koşar.
+  if (adaptor.girisTipi === 'surec') {
+    const { komut, argumanlar, env } = adaptor.girisKomutu(platform, hesap);
+    if (hesap?.codexHome) fs.mkdirSync(hesap.codexHome, { recursive: true });
+    log.info(`${ad}/${hesap.ad} girişi — tarayıcıda ChatGPT oturumu açılacak, bitince kapanır.`);
+    await new Promise((cozumle, reddet) => {
+      const surec = spawn(komut, argumanlar, {
+        stdio: 'inherit',
+        env: { ...process.env, ...(env || {}) },
+      });
+      surec.on('error', reddet);
+      surec.on('close', (kod) => (kod === 0 ? cozumle() : reddet(new Error(`codex login kod ${kod}`))));
+    });
+    log.ok(`${ad}/${hesap.ad} oturumu kaydedildi${hesap.codexHome ? ` (${hesap.codexHome})` : ''}.`);
+    return;
+  }
+
+  // Tarayıcılı giriş (yedek sürücüler + Gemini çerez senkronu).
+  const profil = hesap?.profileDir || platform.profileDir;
+  log.info(`${ad}/${hesap?.ad || 'varsayılan'} açılıyor — tarayıcıda giriş yap, sonra buraya dön.`);
+  const ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar, { headless: false });
   const page = await sayfaAl(ctx);
   await page.goto(platform.url, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await enterBekle('\nGiriş tamamlandıysa ENTER’a bas (oturum profile kaydedilecek)... ');
+  await enterBekle('\nGiriş tamamlandıysa ENTER’a bas (oturum kaydedilecek)... ');
+
+  if (typeof adaptor.cerezleriSenkronla === 'function') {
+    try {
+      const cerezler = await ctx.cookies(['https://gemini.google.com', 'https://google.com']);
+      await adaptor.cerezleriSenkronla(cerezler, platform, hesap);
+    } catch (e) {
+      log.warn(`Çerez senkronu başarısız: ${e.message}`);
+    }
+  }
   await ctx.close();
-  log.ok(`${ad} oturumu kaydedildi: ${platform.profileDir}`);
+  log.ok(`${ad}/${hesap?.ad || 'varsayılan'} oturumu kaydedildi.`);
 }
 
 async function komutNew(opsiyon, ayarlar) {
@@ -317,7 +370,7 @@ async function main() {
 
   switch (komut) {
     case 'login':
-      return komutLogin(pozisyonel, ayarlar);
+      return komutLogin(pozisyonel, opsiyon, ayarlar);
     case 'new': {
       const job = await komutNew(opsiyon, ayarlar);
       if (opsiyon.run) await jobuCalistir(job, ayarlar, opsiyon.headless ? { headless: true } : {});

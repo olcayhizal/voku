@@ -31,29 +31,31 @@ const SERVIS_BINARY = path.join(ROOT, 'tools', calistirilabilir('gemini-api-serv
 const ENV_DOSYASI = path.join(SERVIS_DIZINI, '.env');
 const GWR = path.join(ROOT, 'tools', 'gwr', 'bin', 'gwr.mjs');
 
-let servisSureci = null;
+// Çoklu hesap: her hesap ayrı portta ayrı köprü sürecidir. port → süreç.
+const koprular = new Map();
 
-function taban(platform) {
-  return (platform?.baseUrl || 'http://127.0.0.1:4981').replace(/\/+$/, '');
-}
-
-/**
- * Köprünün dinleyeceği port. Upstream'in `.env.example`'ı panelinkiyle aynı
- * portu (4173) öneriyor; taze bir kurulumda köprü paneli ezmeye çalışıp
- * "bind: address already in use" ile ölüyordu. Port artık tek kaynaktan —
- * `settings.json > platforms.gemini.baseUrl` — türetilir.
- */
-function portu(platform) {
+/** Bir hesabın portu (tek hesapta baseUrl'den, çokluda hesap.port). */
+function portu(platform, hesap) {
+  if (hesap?.port) return String(hesap.port);
   try {
-    return new URL(taban(platform)).port || '4981';
+    return new URL((platform?.baseUrl || 'http://127.0.0.1:4981')).port || '4981';
   } catch {
     return '4981';
   }
 }
 
-async function saglikli(platform, timeoutMs = 2500) {
+function taban(platform, hesap) {
+  return `http://127.0.0.1:${portu(platform, hesap)}`;
+}
+
+/** Bir hesabın .env yolu: tek hesapta düz `.env`, çokluda `.env.<envAdi>`. */
+function envYolu(hesap) {
+  return hesap?.envAdi ? path.join(SERVIS_DIZINI, `.env.${hesap.envAdi}`) : ENV_DOSYASI;
+}
+
+async function saglikli(port, timeoutMs = 2500) {
   try {
-    const yanit = await fetch(`${taban(platform)}/health`, {
+    const yanit = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
     return yanit.ok;
@@ -62,49 +64,71 @@ async function saglikli(platform, timeoutMs = 2500) {
   }
 }
 
-/** Servisi arka planda başlatır ve sağlıklı olana kadar bekler. */
-async function servisiBaslat(platform) {
+/** `.env` dosyasını okuyup GEMINI_* değişkenlerini env objesine çıkarır. */
+function envDegiskenleri(dosya) {
+  const cikti = {};
+  if (!fs.existsSync(dosya)) return cikti;
+  for (const satir of fs.readFileSync(dosya, 'utf8').split('\n')) {
+    const m = satir.match(/^\s*(GEMINI_[A-Z0-9_]+)\s*=\s*(.*)$/);
+    if (m) cikti[m[1]] = m[2].trim();
+  }
+  return cikti;
+}
+
+/** Bir hesabın köprü servisini o hesabın portunda başlatır, sağlıklı olana dek bekler. */
+async function servisiBaslat(platform, hesap) {
+  const port = portu(platform, hesap);
+  if (koprular.has(port) && (await saglikli(port))) return;
+
   if (!fs.existsSync(SERVIS_BINARY)) {
     throw new Error(
-      `Gemini köprüsü derlenmemiş. tools/gemini-web-to-api içinde \`go build -o ../gemini-api-server ./cmd/server\` çalıştır.`
+      `Gemini köprüsü derlenmemiş. scripts/motorlari-kur (Windows: .cmd, macOS: .command) ile kur.`
     );
   }
-  if (!fs.existsSync(ENV_DOSYASI)) {
+  const env = envYolu(hesap);
+  if (!fs.existsSync(env)) {
     throw new Error(
-      'Gemini köprüsünün .env dosyası yok. Panelden "Giriş yap" ile Gemini oturumunu aç — çerezler otomatik yazılır.'
+      `Gemini köprüsünün .env dosyası yok (${path.basename(env)}). Panelden "${hesap?.ad || 'Gemini'}" için "Giriş yap" ile oturumu aç.`
     );
   }
 
-  log.info('[gemini-http] köprü servisi başlatılıyor');
-  servisSureci = spawn(SERVIS_BINARY, [], {
+  log.info(`[gemini-http] köprü başlatılıyor — ${hesap?.ad || 'varsayılan'} (:${port})`);
+  const surec = spawn(SERVIS_BINARY, [], {
     cwd: SERVIS_DIZINI,
-    // PORT env ile veriliyor: .env'de ne yazarsa yazsın köprü doğru portta
-    // kalkar (eski kurulumlarda .env panelin portunu taşıyor olabilir).
-    env: { ...process.env, PORT: portu(platform) },
+    // Çerezler ve PORT doğrudan env'e verilir: köprü cwd'deki düz `.env`'i
+    // okusa bile OS env öncelikli olur, hesaplar birbirine karışmaz.
+    env: { ...process.env, ...envDegiskenleri(env), PORT: port },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
-  servisSureci.stdout.on('data', () => {});
-  servisSureci.stderr.on('data', (d) => log.warn(`[gemini-http] ${String(d).trim().slice(0, 200)}`));
-  servisSureci.on('close', () => {
-    servisSureci = null;
+  koprular.set(port, surec);
+  surec.stdout.on('data', () => {});
+  surec.stderr.on('data', (d) => log.warn(`[gemini-http:${port}] ${String(d).trim().slice(0, 200)}`));
+  surec.on('close', () => {
+    if (koprular.get(port) === surec) koprular.delete(port);
   });
 
   for (let i = 0; i < 40; i++) {
-    if (await saglikli(platform)) {
-      log.ok('[gemini-http] köprü hazır');
+    if (await saglikli(port)) {
+      log.ok(`[gemini-http] köprü hazır (:${port})`);
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('Gemini köprüsü 20 sn içinde ayağa kalkmadı — logs/voku.log ve .env çerezlerine bak.');
+  throw new Error(`Gemini köprüsü :${port} 20 sn içinde ayağa kalkmadı — ${path.basename(env)} çerezlerine bak.`);
+}
+
+/** Tüm köprü süreçlerini kapatır (panel kapanışında). */
+export function koprulariDurdur() {
+  for (const surec of koprular.values()) surec.kill('SIGTERM');
+  koprular.clear();
 }
 
 /**
  * Gemini tarayıcı profilindeki oturum çerezlerini köprünün .env'ine yazar.
  * Panel "Giriş yap" akışını tamamladığında çağrılır.
  */
-export async function cerezleriSenkronla(cerezler, platform) {
+export async function cerezleriSenkronla(cerezler, platform, hesap) {
   const bul = (isim) => cerezler.find((c) => c.name === isim)?.value || null;
   const psid = bul('__Secure-1PSID');
   const psidts = bul('__Secure-1PSIDTS');
@@ -114,10 +138,11 @@ export async function cerezleriSenkronla(cerezler, platform) {
     );
   }
 
-  let icerik = fs.existsSync(ENV_DOSYASI)
-    ? fs.readFileSync(ENV_DOSYASI, 'utf8')
+  const dosya = envYolu(hesap);
+  let icerik = fs.existsSync(dosya)
+    ? fs.readFileSync(dosya, 'utf8')
     : fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
-  const port = portu(platform);
+  const port = portu(platform, hesap);
   icerik = icerik
     .replace(/^GEMINI_1PSID=.*$/m, `GEMINI_1PSID=${psid}`)
     .replace(/^GEMINI_1PSIDTS=.*$/m, `GEMINI_1PSIDTS=${psidts}`);
@@ -125,13 +150,14 @@ export async function cerezleriSenkronla(cerezler, platform) {
   icerik = /^PORT=/m.test(icerik)
     ? icerik.replace(/^PORT=.*$/m, `PORT=${port}`)
     : `PORT=${port}\n${icerik}`;
-  fs.writeFileSync(ENV_DOSYASI, icerik);
-  log.ok('[gemini-http] çerezler köprüye yazıldı');
+  fs.writeFileSync(dosya, icerik);
+  log.ok(`[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} (${path.basename(dosya)})`);
 
-  // Servis çalışıyorsa yeni çerezlerle yeniden doğsun.
-  if (servisSureci) {
-    servisSureci.kill('SIGTERM');
-    servisSureci = null;
+  // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun.
+  const surec = koprular.get(port);
+  if (surec) {
+    surec.kill('SIGTERM');
+    koprular.delete(port);
   }
 }
 
@@ -170,18 +196,17 @@ export async function watermarkTemizle(dosyaYolu) {
   fs.renameSync(gecici, dosyaYolu);
 }
 
-export async function hazirla(_page, platform) {
-  if (await saglikli(platform)) return;
-  await servisiBaslat(platform);
+export async function hazirla(_page, platform, _sel, _ayarlar, hesap) {
+  await servisiBaslat(platform, hesap);
 }
 
-export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal }) {
+export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }) {
   fs.mkdirSync(outDir, { recursive: true });
   const foto = fs.readFileSync(path.resolve(imagePath));
   const uzanti = path.extname(imagePath).toLowerCase();
   const mime = uzanti === '.png' ? 'image/png' : uzanti === '.webp' ? 'image/webp' : 'image/jpeg';
 
-  const yanit = await fetch(`${taban(platform)}/openai/v1/chat/completions`, {
+  const yanit = await fetch(`${taban(platform, hesap)}/openai/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     // Zaman aşımı + job durdurma sinyali birlikte.
@@ -207,6 +232,13 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   if (!yanit.ok) {
     const govde = (await yanit.text()).slice(0, 300);
+    // Kota/limit ise havuz bu hesabı dinlenmeye alsın (429 ya da metin).
+    if (yanit.status === 429 || /quota|rate limit|resource.?exhausted|too many/i.test(govde)) {
+      const e = new Error(`Gemini kullanım limiti doldu (${yanit.status}).`);
+      e.limitDolu = true;
+      e.resetsAt = null; // köprü net reset zamanı vermiyor → varsayılan cooldown
+      throw e;
+    }
     throw new Error(`Gemini köprüsü ${yanit.status}: ${govde}`);
   }
 
@@ -243,10 +275,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
   return dosyalar;
 }
 
-/** Panel/CLI kapanırken köprüyü de kapat. */
+/** Panel/CLI kapanırken tüm köprüleri kapat. */
 export function kapat() {
-  if (servisSureci) {
-    servisSureci.kill('SIGTERM');
-    servisSureci = null;
-  }
+  koprulariDurdur();
 }

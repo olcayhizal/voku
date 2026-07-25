@@ -21,3 +21,6 @@ config/guncelleme.json
 .guncelleme-durumu.json
 
 config/tunel.json
+
+# Çoklu hesap havuz durumu
+jobs/.havuz.json

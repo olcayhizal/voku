@@ -2,16 +2,217 @@ import { contextAc, sayfaAl, bekle } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import { jobYaz, manifestYaz, durumuHesapla } from './store.js';
 import { varyantDizini, taskVaryantlariniUret } from './varyant.js';
+import * as havuz from './havuz.js';
 import { log } from './logger.js';
 
+// Tüm hesaplar limitteyse ve en erken açılış bundan uzaksa task beklemez,
+// pending kalır (kullanıcı sonra başlatır). Yakınsa worker bekleyip devam eder.
+const HESAP_BEKLEME_ESIGI = 8 * 60 * 1000;
+
+/** Reset zamanını "14:30" gibi okunur saate çevirir. */
+function saatEtiketi(ms) {
+  if (!ms) return 'bilinmiyor';
+  const d = new Date(ms);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /**
- * Tek bir task'ı verilen sekmede işler; hata olursa maxAttempts'e kadar
- * backoff ile tekrar dener. Task state'i her adımda diske yazılır.
+ * Bir task'ı işler. Havuzdan hesap kiralar; hesap kota hatası verirse onu
+ * `resets_at`'e göre dinlenmeye alıp **denemeyi harcamadan** başka hesaba
+ * geçer (failover). Gerçek üretim hatası normal retry sayılır.
+ *
+ * Dönüş: 'done' | 'failed' | 'pending' (tüm hesaplar limitte / durduruldu).
  */
-async function taskiIsle(job, task, page, adaptor, platformAdi, sel, ayarlar, signal) {
+async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesaplar, sel, ayarlar, signal, hazirlanan) {
   while (task.attempts < ayarlar.maxAttempts) {
     if (signal?.aborted) {
-      // Durdurulduysa task bekliyor kalsın — yeniden başlatılabilir olmalı.
+      task.status = 'pending';
+      task.error = null;
+      jobYaz(job);
+      return 'pending';
+    }
+
+    // 1) Failover sırasıyla uygun bir hesap kirala.
+    const hesap = havuz.kirala(platformAdi, hesaplar);
+    if (!hesap) {
+      const erken = havuz.enErkenAcilis(platformAdi, hesaplar);
+      if (erken === null) {
+        // Uygun hesap var ama slotları başka worker'larca dolu — kısa bekle.
+        await bekle(1500, signal);
+        continue;
+      }
+      const kalan = erken - Date.now();
+      if (kalan > HESAP_BEKLEME_ESIGI) {
+        task.status = 'pending';
+        task.error = `Tüm ${platformAdi} hesapları limitte — ${saatEtiketi(erken)}'de açılacak, iş bekliyor.`;
+        jobYaz(job);
+        manifestYaz(job);
+        log.warn(`[${platformAdi}] ${task.id} bekletildi — hesaplar ${saatEtiketi(erken)}'e kadar limitte`);
+        return 'pending';
+      }
+      await bekle(Math.min(kalan + 1000, 30000), signal);
+      continue;
+    }
+
+    // 2) Hesap ilk kez kullanılıyorsa hazırla (Codex girişi / köprü servisi).
+    if (!hazirlanan.has(hesap.ad)) {
+      try {
+        await adaptor.hazirla(null, platform, sel, ayarlar, hesap);
+        hazirlanan.add(hesap.ad);
+        log.ok(`[${platformAdi}] hesap hazır: ${hesap.ad}`);
+      } catch (e) {
+        havuz.birak(platformAdi, hesap.ad);
+        // Bu hesabın oturumu/kurulumu bozuk — uzunca dinlenmeye al, ötekine geç.
+        havuz.dinlenmeyeAl(platformAdi, hesap.ad, Date.now() + 30 * 60 * 1000, `hazırlık: ${e.message}`);
+        log.err(`[${platformAdi}] hesap ${hesap.ad} hazırlanamadı: ${e.message}`);
+        continue;
+      }
+    }
+
+    // 3) Üret.
+    task.attempts += 1;
+    task.status = 'running';
+    task.startedAt = new Date().toISOString();
+    task.error = null;
+    task.hesap = hesap.ad;
+    jobYaz(job);
+
+    try {
+      log.info(`[${platformAdi}:${hesap.ad}] ${task.id} → üretim (deneme ${task.attempts}/${ayarlar.maxAttempts})`);
+      const dosyalar = await adaptor.uret(null, {
+        imagePath: job.inputImage,
+        prompt: task.prompt,
+        outDir: varyantDizini(job, 'uretim'),
+        baseName: `${task.id}-${platformAdi}`,
+        sel,
+        ayarlar,
+        platform,
+        signal,
+        hesap,
+      });
+      havuz.birak(platformAdi, hesap.ad);
+      task.files = dosyalar;
+      task.status = 'done';
+      task.finishedAt = new Date().toISOString();
+      try {
+        await taskVaryantlariniUret(job, task);
+      } catch (e) {
+        log.warn(`[${platformAdi}] ${task.id} demo damgası üretilemedi: ${e.message}`);
+      }
+      jobYaz(job);
+      manifestYaz(job);
+      log.ok(`[${platformAdi}:${hesap.ad}] ${task.id} ✓ ${dosyalar.join(', ')}`);
+      return 'done';
+    } catch (e) {
+      havuz.birak(platformAdi, hesap.ad);
+
+      if (signal?.aborted) {
+        task.status = 'pending';
+        task.error = null;
+        jobYaz(job);
+        log.info(`[${platformAdi}] ${task.id} durduruldu`);
+        return 'pending';
+      }
+
+      // KOTA hatası: hesabı dinlenmeye al, denemeyi HARCAMA, başka hesaba geç.
+      if (e.limitDolu) {
+        task.attempts -= 1;
+        havuz.dinlenmeyeAl(platformAdi, hesap.ad, e.resetsAt, e.message);
+        const ne = e.resetsAt ? `${saatEtiketi(e.resetsAt)}'e kadar` : '(reset okunamadı, ~1s)';
+        log.warn(`[${platformAdi}:${hesap.ad}] limit doldu ${ne} — başka hesaba geçiliyor`);
+        task.status = 'pending';
+        jobYaz(job);
+        continue;
+      }
+
+      // Gerçek üretim hatası → normal retry.
+      task.error = String(e?.message || e);
+      task.finishedAt = new Date().toISOString();
+      const sonMu = task.attempts >= ayarlar.maxAttempts;
+      task.status = sonMu ? 'failed' : 'pending';
+      jobYaz(job);
+      manifestYaz(job);
+      log.warn(`[${platformAdi}:${hesap.ad}] ${task.id} ✗ ${task.error}`);
+      if (sonMu) {
+        log.err(`[${platformAdi}] ${task.id} deneme hakkı bitti → failed`);
+        return 'failed';
+      }
+      await bekle(ayarlar.retryBackoffMs * task.attempts, signal);
+    }
+  }
+  return task.status === 'done' ? 'done' : 'failed';
+}
+
+/**
+ * Tarayıcısız platform kuyruğu (Codex, gemini-http) — hesap havuzuyla.
+ * Worker sayısı = tüm hesapların toplam eşzamanlı slotu; her worker kuyruktan
+ * task çeker, havuzdan hesap kiralar, işler. Hesaplar limite çarptıkça
+ * failover ile taze hesaba kayar.
+ */
+async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler) {
+  const hesaplar = platform.hesaplar || [];
+  const kuyruk = tasklar.filter((t) => t.status !== 'done');
+  const toplamSlot = hesaplar.reduce((n, h) => n + Math.max(1, Number(h.concurrency) || 1), 0);
+  const isciSayisi = Math.max(1, Math.min(toplamSlot, kuyruk.length));
+  const hazirlanan = new Set();
+
+  log.info(
+    `[${platformAdi}] ${adaptor.ad} — ${kuyruk.length} task, ${hesaplar.length} hesap, ${isciSayisi} paralel slot`
+  );
+
+  let sonraki = 0;
+  await Promise.all(
+    Array.from({ length: isciSayisi }, async () => {
+      while (true) {
+        if (secenekler.signal?.aborted) return;
+        const task = kuyruk[sonraki++];
+        if (!task) return;
+        await taskiIsleHavuz(
+          job, task, adaptor, platformAdi, platform, hesaplar, sel, ayarlar, secenekler.signal, hazirlanan
+        );
+      }
+    })
+  );
+}
+
+/**
+ * Tarayıcılı platform kuyruğu (yedek chatgpt/gemini sürücüleri) — tek oturum,
+ * havuz yok. Bir kez tarayıcı açılır, concurrency kadar sekme task çeker.
+ */
+async function tarayiciliKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler) {
+  const kuyruk = tasklar.filter((t) => t.status !== 'done');
+  const esZamanli = Math.max(1, Math.min(Number(platform.concurrency ?? ayarlar.concurrency ?? 2), kuyruk.length));
+  let ctx;
+  try {
+    log.info(`[${platformAdi}] tarayıcı açılıyor — ${kuyruk.length} task, ${esZamanli} sekme paralel`);
+    ctx = await contextAc(platform, ayarlar, secenekler);
+    const ilkSayfa = await sayfaAl(ctx);
+    await adaptor.hazirla(ilkSayfa, platform, sel, ayarlar);
+    log.ok(`[${platformAdi}] oturum hazır`);
+    const isciler = [ilkSayfa];
+    for (let i = 1; i < esZamanli; i++) isciler.push(await ctx.newPage());
+
+    let sonraki = 0;
+    await Promise.all(
+      isciler.map(async (isci) => {
+        while (true) {
+          if (secenekler.signal?.aborted) return;
+          const task = kuyruk[sonraki++];
+          if (!task) return;
+          await taskiIsleBasit(job, task, isci, adaptor, platformAdi, sel, ayarlar, secenekler.signal);
+        }
+      })
+    );
+  } finally {
+    if (ctx) await ctx.close().catch(() => {});
+  }
+}
+
+/** Tarayıcılı sürücü için basit tek-oturum task işleme (havuzsuz). */
+async function taskiIsleBasit(job, task, page, adaptor, platformAdi, sel, ayarlar, signal) {
+  while (task.attempts < ayarlar.maxAttempts) {
+    if (signal?.aborted) {
       task.status = 'pending';
       task.error = null;
       jobYaz(job);
@@ -22,11 +223,7 @@ async function taskiIsle(job, task, page, adaptor, platformAdi, sel, ayarlar, si
     task.startedAt = new Date().toISOString();
     task.error = null;
     jobYaz(job);
-
     try {
-      log.info(
-        `[${platformAdi}] ${task.id} → üretim (deneme ${task.attempts}/${ayarlar.maxAttempts})`
-      );
       const dosyalar = await adaptor.uret(page, {
         imagePath: job.inputImage,
         prompt: task.prompt,
@@ -40,26 +237,20 @@ async function taskiIsle(job, task, page, adaptor, platformAdi, sel, ayarlar, si
       task.files = dosyalar;
       task.status = 'done';
       task.finishedAt = new Date().toISOString();
-
-      // Demo (damgalı) hali üretimin hemen ardından hazırlanır — panelde
-      // sekme değiştirince beklemesin. Başarısız olursa üretim korunur.
       try {
         await taskVaryantlariniUret(job, task);
       } catch (e) {
         log.warn(`[${platformAdi}] ${task.id} demo damgası üretilemedi: ${e.message}`);
       }
-
       jobYaz(job);
       manifestYaz(job);
       log.ok(`[${platformAdi}] ${task.id} ✓ ${dosyalar.join(', ')}`);
       return;
     } catch (e) {
       if (signal?.aborted) {
-        // Durdurma sırasında oluşan hata "arıza" değil — task bekliyor kalır.
         task.status = 'pending';
         task.error = null;
         jobYaz(job);
-        log.info(`[${platformAdi}] ${task.id} durduruldu`);
         return;
       }
       task.error = String(e?.message || e);
@@ -69,25 +260,14 @@ async function taskiIsle(job, task, page, adaptor, platformAdi, sel, ayarlar, si
       jobYaz(job);
       manifestYaz(job);
       log.warn(`[${platformAdi}] ${task.id} ✗ ${task.error}`);
-      if (sonMu) {
-        log.err(`[${platformAdi}] ${task.id} deneme hakkı bitti → failed`);
-        return;
-      }
-      // Kota/limit hatasında beklemeyi uzat — hemen tekrar denemek limiti derinleştirir.
-      const limitMi = /rate limit|too many|limit for|kota|deneme sınırı|try again later/i.test(
-        task.error
-      );
+      if (sonMu) return;
+      const limitMi = /rate limit|too many|limit for|kota|try again later/i.test(task.error);
       await bekle(ayarlar.retryBackoffMs * task.attempts * (limitMi ? 6 : 1), signal);
     }
   }
 }
 
-/**
- * Tek platformun task kuyruğunu işler.
- * Tarayıcı bir kez açılır; concurrency kadar SEKME açılıp her sekme kuyruktan
- * task çeker (worker havuzu). Sekmeler aynı context'i, dolayısıyla aynı
- * oturumu paylaşır.
- */
+/** Tek platformun task kuyruğunu işler (havuzlu veya tarayıcılı). */
 async function platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler) {
   const platform = ayarlar.platforms[platformAdi];
   if (!platform || platform.enabled === false) {
@@ -101,57 +281,15 @@ async function platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler) {
   }
 
   const sel = ayarlar.selectors[platformAdi] || {};
-  // Platform hangi sürücüyle koşacağını seçebilir (tarayıcı ↔ Codex geçişi).
   const adaptor = adaptorAl(platform.adapter || platformAdi);
-  const tarayiciIle = adaptor.tarayiciGerekli !== false;
-  let ctx;
-
-  const kuyruk = tasklar.filter((t) => t.status !== 'done');
-  const esZamanli = Math.max(
-    1,
-    Math.min(
-      Number(platform.concurrency ?? ayarlar.concurrency ?? 2),
-      kuyruk.length
-    )
-  );
 
   try {
-    // Tarayıcılı sürücüde her worker bir SEKME; tarayıcısız sürücüde (Codex)
-    // sekme yok, worker doğrudan alt süreç çalıştırır.
-    let isciler;
-    if (tarayiciIle) {
-      log.info(
-        `[${platformAdi}] tarayıcı açılıyor — ${kuyruk.length} task, ${esZamanli} sekme paralel`
-      );
-      ctx = await contextAc(platform, ayarlar, secenekler);
-      const ilkSayfa = await sayfaAl(ctx);
-      await adaptor.hazirla(ilkSayfa, platform, sel, ayarlar);
-      log.ok(`[${platformAdi}] oturum hazır`);
-      isciler = [ilkSayfa];
-      for (let i = 1; i < esZamanli; i++) isciler.push(await ctx.newPage());
+    if (adaptor.tarayiciGerekli === false) {
+      await havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler);
     } else {
-      log.info(
-        `[${platformAdi}] ${adaptor.ad} sürücüsü (tarayıcısız) — ${kuyruk.length} task, ${esZamanli} paralel`
-      );
-      await adaptor.hazirla(null, platform, sel, ayarlar);
-      log.ok(`[${platformAdi}] sürücü hazır`);
-      isciler = Array.from({ length: esZamanli }, () => null);
+      await tarayiciliKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler);
     }
-
-    // Worker havuzu: her worker kuyruktan sıradaki task'ı çeker.
-    let sonraki = 0;
-    await Promise.all(
-      isciler.map(async (isci) => {
-        while (true) {
-          if (secenekler.signal?.aborted) return;
-          const task = kuyruk[sonraki++]; // tek thread — yarış yok
-          if (!task) return;
-          await taskiIsle(job, task, isci, adaptor, platformAdi, sel, ayarlar, secenekler.signal);
-        }
-      })
-    );
   } catch (e) {
-    // Oturum/tarayıcı seviyesinde hata → bu platformun kalan task'ları bekliyor kalır
     const mesaj = String(e?.message || e);
     log.err(`[${platformAdi}] platform hatası: ${mesaj}`);
     for (const t of tasklar) {
@@ -161,8 +299,6 @@ async function platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler) {
       }
     }
     jobYaz(job);
-  } finally {
-    if (ctx) await ctx.close().catch(() => {});
   }
 }
 
@@ -185,8 +321,7 @@ export async function jobuCalistir(job, ayarlar, secenekler = {}) {
   );
 
   const isler = [...gruplar.entries()].map(
-    ([platformAdi, tasklar]) => () =>
-      platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler)
+    ([platformAdi, tasklar]) => () => platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler)
   );
 
   if (ayarlar.parallelPlatforms) {

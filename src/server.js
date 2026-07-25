@@ -25,6 +25,7 @@ import { adaptorAl } from './adapters/index.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
+import { havuzOzeti } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
 
@@ -160,7 +161,11 @@ function oturumDurumu(platform) {
 
 function durumPaketi(ayarlar) {
   return {
-    platformlar: Object.values(ayarlar.platforms).map(oturumDurumu),
+    platformlar: Object.values(ayarlar.platforms).map((p) => ({
+      ...oturumDurumu(p),
+      // Çoklu hesap havuzunun anlık durumu: hangi hesap aktif/dinlenmede.
+      hesaplar: havuzOzeti(p.ad, p.hesaplar || []),
+    })),
     joblar: jobListele().map(jobOzet).reverse(),
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
     promptDosyasi: path.relative(ROOT, promptDosyaYolu()),
@@ -746,6 +751,12 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
 
   const kapat = async () => {
     if (durum.telegram) durum.telegram.durdur();
+    // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
+    try {
+      adaptorAl('gemini-http').koprulariDurdur?.();
+    } catch {
+      /* köprü hiç açılmadıysa sorun değil */
+    }
     for (const [ad, kayit] of durum.loginContextleri) {
       log.info(`[${ad}] giriş penceresi kapatılıyor`);
       await kayit.ctx.close().catch(() => {});
