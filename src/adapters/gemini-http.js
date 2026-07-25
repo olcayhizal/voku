@@ -64,6 +64,25 @@ async function saglikli(port, timeoutMs = 2500) {
   }
 }
 
+/**
+ * Köprünün Gemini'ye GERÇEKTEN bağlı olduğunu kanıtlar: model listesi.
+ * `/health` yalnız sürecin ayakta olduğunu söyler — çerez çürükse köprü
+ * ayaktadır ama model listesi boş gelir ve üretim "Available models: []"
+ * ile patlar. Bu yüzden hazırlık model listesinin DOLMASINI bekler.
+ */
+async function modelListesi(port, timeoutMs = 2500) {
+  try {
+    const yanit = await fetch(`http://127.0.0.1:${port}/openai/v1/models`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!yanit.ok) return [];
+    const j = await yanit.json();
+    return Array.isArray(j.data) ? j.data : [];
+  } catch {
+    return [];
+  }
+}
+
 /** `.env` dosyasını okuyup GEMINI_* değişkenlerini env objesine çıkarır. */
 function envDegiskenleri(dosya) {
   const cikti = {};
@@ -78,7 +97,8 @@ function envDegiskenleri(dosya) {
 /** Bir hesabın köprü servisini o hesabın portunda başlatır, sağlıklı olana dek bekler. */
 async function servisiBaslat(platform, hesap) {
   const port = portu(platform, hesap);
-  if (koprular.has(port) && (await saglikli(port))) return;
+  // Zaten çalışan köprü: yalnız ayakta değil, Gemini'ye bağlı da olmalı.
+  if (koprular.has(port) && (await saglikli(port)) && (await modelListesi(port)).length) return;
 
   if (!fs.existsSync(SERVIS_BINARY)) {
     throw new Error(
@@ -108,14 +128,34 @@ async function servisiBaslat(platform, hesap) {
     if (koprular.get(port) === surec) koprular.delete(port);
   });
 
+  // 1) Süreç ayağa kalksın (/health).
+  let ayakta = false;
   for (let i = 0; i < 40; i++) {
-    if (await saglikli(port)) {
-      log.ok(`[gemini-http] köprü hazır (:${port})`);
+    if (await saglikli(port)) { ayakta = true; break; }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!ayakta) {
+    throw new Error(`Gemini köprüsü :${port} 20 sn içinde ayağa kalkmadı — ${path.basename(env)} çerezlerine bak.`);
+  }
+
+  // 2) Gemini'ye bağlansın (model listesi dolsun). Çerez çürükse liste boş
+  //    kalır — hazırlık burada BAŞARISIZ olur, runner hesabı dinlenmeye alıp
+  //    başka hesaba geçer. Böylece "Sına" da gerçeği söyler, üretim sürpriz
+  //    "Available models: []" görmez.
+  for (let i = 0; i < 30; i++) {
+    if ((await modelListesi(port)).length) {
+      log.ok(`[gemini-http] köprü hazır (:${port}) — ${hesap?.ad || 'varsayılan'}`);
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`Gemini köprüsü :${port} 20 sn içinde ayağa kalkmadı — ${path.basename(env)} çerezlerine bak.`);
+  const e = new Error(
+    `Gemini "${hesap?.ad || 'varsayılan'}" oturumu geçersiz: köprü ayakta ama model listesi boş (çerezler ölmüş). Panelden bu hesaba yeniden giriş yap.`
+  );
+  e.limitDolu = true; // runner failover'a soksun (başka hesaba geç)
+  e.sebep = 'oturum';
+  e.resetsAt = Date.now() + 30 * 60 * 1000;
+  throw e;
 }
 
 /** Tüm köprü süreçlerini kapatır (panel kapanışında). */

@@ -86,6 +86,13 @@ ntthanh2603). Çerezle (`__Secure-1PSID`/`__Secure-1PSIDTS`) Gemini web
 oturumunu konuşur, OpenAI-uyumlu uç verir. Giriş **tarayıcıda** yapılır
 (profil), panel giriş biterken çerezleri köprünün `.env`'ine senkronlar.
 Servisi adapter kendi başlatır (`tools/gemini-api-server` binary'si).
+- **Hazırlık `/health` değil model listesini bekler.** `/health` yalnız
+  sürecin ayakta olduğunu söyler; çerez çürükse köprü ayaktadır ama Gemini'ye
+  bağlanamaz ve model listesi boş kalır. `servisiBaslat` bu yüzden
+  `/openai/v1/models` dolana kadar (≤15 sn) bekler; dolmazsa "oturum geçersiz"
+  hatası atar (`e.limitDolu + sebep='oturum'`) → runner hesabı dinlenmeye alıp
+  başka hesaba geçer. Böylece **"Sına" gerçeği söyler** (köprü-ayakta değil
+  Gemini-bağlı) ve üretim sürpriz "Available models: []" görmez.
 - **Yerel yama şart:** upstream chat yolunda görseli indirmez, Google'ın
   lh3 URL'ini döndürür — o URL oturum bağımlı, dışarıdan 403. Yama chat'te
   de kimlik doğrulamalı indirmeyi açıp base64'ü içeriğe gömer.

@@ -66,8 +66,10 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
         log.ok(`[${platformAdi}] hesap hazır: ${hesap.ad}`);
       } catch (e) {
         havuz.birak(platformAdi, hesap.ad);
-        // Bu hesabın oturumu/kurulumu bozuk — uzunca dinlenmeye al, ötekine geç.
-        havuz.dinlenmeyeAl(platformAdi, hesap.ad, Date.now() + 30 * 60 * 1000, `hazırlık: ${e.message}`);
+        // Bu hesabın oturumu/kurulumu bozuk — dinlenmeye al, ötekine geç.
+        // Hata reset zamanı verdiyse (oturum çürük → 30 dk) onu kullan.
+        const resetsAt = e.resetsAt || Date.now() + 30 * 60 * 1000;
+        havuz.dinlenmeyeAl(platformAdi, hesap.ad, resetsAt, `hazırlık: ${e.message}`);
         log.err(`[${platformAdi}] hesap ${hesap.ad} hazırlanamadı: ${e.message}`);
         continue;
       }
