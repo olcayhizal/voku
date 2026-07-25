@@ -212,33 +212,40 @@ export function koprulariDurdur() {
  * Panel "Giriş yap" akışını tamamladığında çağrılır.
  */
 export async function cerezleriSenkronla(cerezler, platform, hesap) {
-  // Aynı isimde birden fazla çerez olabilir (.google.com vs gemini.google.com;
-  // farklı path). En uzun değeri seç — kısa/eski kopyalar geçersiz oluyor
-  // (PSIDTS=81b gibi kırpık değerler 401'e yol açıyordu). Google hesabı
-  // (accounts.google.com) çerezlerini ele, Gemini/google domaininde kal.
-  const bul = (isim) => {
-    const adaylar = cerezler
-      .filter((c) => c.name === isim && c.value && !/accounts\.google/.test(c.domain || ''))
-      .sort((a, b) => b.value.length - a.value.length);
-    return adaylar[0]?.value || cerezler.find((c) => c.name === isim)?.value || null;
-  };
-  const psid = bul('__Secure-1PSID');
-  const psidts = bul('__Secure-1PSIDTS');
+  // Google __Secure-1PSID/1PSIDTS çerezlerini BİRDEN ÇOK domaine, FARKLI
+  // değerlerle basar (.google.com, .google.com.tr, .youtube.com,
+  // accounts.google.com…). Köprü ise çerezleri sabit `.google.com` domainiyle
+  // gönderiyor (ToHTTPCookies) — yani çift MUTLAKA .google.com'dan gelmeli.
+  // "En uzun değeri seç" gibi sezgiler youtube/com.tr kopyasını kapıp çifti
+  // karıştırıyor → Google 401 "Rotation failed / invalid PSID".
+  const adaylar = (isim) => cerezler.filter((c) => c.name === isim && c.value);
+  const dotComdan = (isim) =>
+    adaylar(isim).find((c) => c.domain === '.google.com' || c.domain === 'google.com')?.value || null;
+
+  // Teşhis: hangi domainlerde hangi uzunlukta kopyalar görüldü (değer yok).
+  const ozet = (isim) =>
+    adaylar(isim).map((c) => `${c.domain}:${c.value.length}b`).join(', ') || 'hiç';
+  log.info(`[gemini-http] çerez adayları — PSID[${ozet('__Secure-1PSID')}] PSIDTS[${ozet('__Secure-1PSIDTS')}]`);
+
+  const psid = dotComdan('__Secure-1PSID');
+  const psidts = dotComdan('__Secure-1PSIDTS');
 
   if (!psid) {
-    const google = cerezler.filter((c) => /google/.test(c.domain || '')).map((c) => c.name);
     throw new Error(
-      `Gemini oturumu bulunamadı (__Secure-1PSID yok). Tarayıcıda gemini.google.com'a giriş yapıldığından emin ol. Görülen Google çerezleri: ${google.slice(0, 8).join(', ') || 'hiç'}`
+      `Gemini oturumu .google.com domaininde bulunamadı (__Secure-1PSID yok). Tarayıcıda gemini.google.com'a giriş yapıldığından emin ol. Görülen kopyalar: PSID[${ozet('__Secure-1PSID')}]`
     );
   }
   if (!psidts) {
-    // PSID var ama PSIDTS yok: çerez henüz olgunlaşmamış. Eski/boş PSIDTS'i
-    // .env'e YAZMA (köprü geçersiz görür) — kullanıcı biraz bekleyip yenilesin.
+    // PSID var ama .google.com'da PSIDTS yok: çerez henüz olgunlaşmamış.
+    // Yanlış domainden almak 401 doğurur — yazmayıp kullanıcıyı yönlendir.
     throw new Error(
-      '__Secure-1PSIDTS çerezi henüz oluşmamış. Açılan Gemini sekmesinde birkaç saniye bekle (bir mesaj yazıp gönder), SONRA "Girişi tamamladım"a bas. Tek Google hesabıyla giriş yaptığından emin ol.'
+      `__Secure-1PSIDTS çerezi .google.com'da henüz oluşmamış (görülen: PSIDTS[${ozet('__Secure-1PSIDTS')}]). Açılan Gemini sekmesinde bir mesaj yazıp gönder, birkaç saniye bekle, SONRA "Girişi tamamladım"a bas.`
     );
   }
-  log.info(`[gemini-http] çerez alındı — ${hesap?.ad || 'varsayılan'}: PSID+PSIDTS var`);
+  log.info(
+    `[gemini-http] çerez alındı — ${hesap?.ad || 'varsayılan'}: .google.com çifti ` +
+      `[PSID=${psid.length}b PSIDTS=${psidts.length}b sidts-öneki=${psidts.startsWith('sidts-')}]`
+  );
 
   const dosya = envYolu(hesap);
   const port = portu(platform, hesap);
