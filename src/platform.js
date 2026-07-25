@@ -107,3 +107,45 @@ export function komutCagrisi(ad) {
   }
   return { komut: yol, onEk: [] };
 }
+
+/**
+ * Bir TCP portunu dinleyen süreci zorla kapatır (zombi köprü temizliği).
+ * Panel yeniden başladığında eski Gemini köprüsü portu tutmaya devam edip
+ * yeni köprünün "bind: address already in use" almasına yol açabiliyor.
+ */
+export function portTutaniOldur(port) {
+  try {
+    if (WINDOWS) {
+      const out = execFileSync('cmd', ['/c', `netstat -ano | findstr :${port}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const pidler = new Set();
+      for (const satir of out.split('\n')) {
+        const m = satir.match(/LISTENING\s+(\d+)\s*$/i) || satir.match(/:\s*\d+.*?\s(\d+)\s*$/);
+        if (/LISTENING/i.test(satir) && m) pidler.add(m[1]);
+      }
+      for (const pid of pidler) {
+        try {
+          execFileSync('taskkill', ['/F', '/PID', pid], { stdio: 'ignore' });
+        } catch {
+          /* zaten kapanmış */
+        }
+      }
+    } else {
+      const out = execFileSync('lsof', ['-ti', `:${port}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      for (const pid of out.split('\n').map((s) => s.trim()).filter(Boolean)) {
+        try {
+          execFileSync('kill', ['-9', pid], { stdio: 'ignore' });
+        } catch {
+          /* zaten kapanmış */
+        }
+      }
+    }
+  } catch {
+    /* port zaten boş ya da araç (netstat/lsof) yok — sorun değil */
+  }
+}

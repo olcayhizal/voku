@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT } from '../paths.js';
-import { calistirilabilir } from '../platform.js';
+import { calistirilabilir, portTutaniOldur } from '../platform.js';
 import { log } from '../logger.js';
 
 export const ad = 'gemini-http';
@@ -94,11 +94,34 @@ function envDegiskenleri(dosya) {
   return cikti;
 }
 
+/**
+ * Portu yeni köprü için boşaltır. Eski/geçersiz köprü (map'te ya da panel
+ * restart'tan kalan zombi) portu tutuyorsa yeni bind "address already in use"
+ * alır ve eski köprü (eski çerezle) çalışmaya devam eder — çerez güncellense
+ * bile "cookies invalid" görülür. Bu yüzden önce kesin boşaltılır.
+ */
+async function portuBosalt(port) {
+  const eski = koprular.get(port);
+  if (eski) {
+    eski.kill('SIGTERM');
+    koprular.delete(port);
+  }
+  // Health düşene (port boş) kadar bekle; düşmezse portu tutanı zorla kapat.
+  for (let i = 0; i < 16; i++) {
+    if (!(await saglikli(port))) return;
+    if (i === 4) portTutaniOldur(port); // birkaç deneme sonra zorla
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
 /** Bir hesabın köprü servisini o hesabın portunda başlatır, sağlıklı olana dek bekler. */
 async function servisiBaslat(platform, hesap) {
   const port = portu(platform, hesap);
   // Zaten çalışan köprü: yalnız ayakta değil, Gemini'ye bağlı da olmalı.
   if (koprular.has(port) && (await saglikli(port)) && (await modelListesi(port)).length) return;
+
+  // Sağlıklı değilse (eski çerez) ya da başka süreç tutuyorsa portu boşalt.
+  await portuBosalt(port);
 
   if (!fs.existsSync(SERVIS_BINARY)) {
     throw new Error(
@@ -193,22 +216,24 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
     ? fs.readFileSync(dosya, 'utf8')
     : fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
   const port = portu(platform, hesap);
-  icerik = icerik
-    .replace(/^GEMINI_1PSID=.*$/m, `GEMINI_1PSID=${psid}`)
-    .replace(/^GEMINI_1PSIDTS=.*$/m, `GEMINI_1PSIDTS=${psidts}`);
-  // Örnek dosyadan gelen PORT paneli eziyor; doğrusuyla değiştirilir.
-  icerik = /^PORT=/m.test(icerik)
-    ? icerik.replace(/^PORT=.*$/m, `PORT=${port}`)
-    : `PORT=${port}\n${icerik}`;
+  // Satır varsa değiştir, yoksa EKLE — aksi halde .env'de ilgili satır yoksa
+  // replace sessizce boş geçip çerez yazılmamış olur ("cookies invalid").
+  const ayarla = (metin, anahtar, deger) =>
+    new RegExp(`^${anahtar}=.*$`, 'm').test(metin)
+      ? metin.replace(new RegExp(`^${anahtar}=.*$`, 'm'), `${anahtar}=${deger}`)
+      : `${metin.trimEnd()}\n${anahtar}=${deger}\n`;
+  icerik = ayarla(icerik, 'GEMINI_1PSID', psid);
+  icerik = ayarla(icerik, 'GEMINI_1PSIDTS', psidts);
+  icerik = ayarla(icerik, 'PORT', port);
   fs.writeFileSync(dosya, icerik);
   log.ok(`[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} (${path.basename(dosya)})`);
 
-  // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun.
+  // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun. Windows'ta
+  // SIGTERM her zaman anında öldürmüyor — portu tutanı da zorla kapat.
   const surec = koprular.get(port);
-  if (surec) {
-    surec.kill('SIGTERM');
-    koprular.delete(port);
-  }
+  koprular.delete(port);
+  if (surec) surec.kill('SIGTERM');
+  portTutaniOldur(port);
 }
 
 /**
