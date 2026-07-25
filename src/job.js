@@ -81,7 +81,7 @@ export function kaynakNormalize(deger) {
  * @param {{ imagePath: string, phone?: string, prompts: Array, note?: string,
  *          kaynak?: string, kaynakBilgi?: object }} p
  */
-export async function jobOlustur({ imagePath, phone, prompts, note, kaynak, kaynakBilgi }) {
+export async function jobOlustur({ imagePath, phone, prompts, note, kaynak, kaynakBilgi, yatayEsigi }) {
   const foto = path.resolve(imagePath);
   if (!fs.existsSync(foto)) throw new Error(`Fotoğraf bulunamadı: ${foto}`);
 
@@ -96,7 +96,7 @@ export async function jobOlustur({ imagePath, phone, prompts, note, kaynak, kayn
   const inputKopya = path.join(outputDir, `input${path.extname(foto) || '.jpg'}`);
   let girdi;
   try {
-    girdi = await girdiyiHazirla(foto, inputKopya);
+    girdi = await girdiyiHazirla(foto, inputKopya, { yatayEsigi });
     if (girdi.dondu) {
       log.info(`${id}: yatay fotoğraf saat yönünde 90° döndürüldü → ${girdi.genislik}×${girdi.yukseklik}`);
     }

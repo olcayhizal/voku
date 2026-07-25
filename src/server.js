@@ -602,6 +602,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
         prompts: promptlar,
         note: govde.note || null,
         kaynak: 'panel',
+        yatayEsigi: ayarlar.girdiYatayOrani,
       });
       fs.rmSync(gecici, { force: true });
       job.sourceImage = govde.imageName || null;

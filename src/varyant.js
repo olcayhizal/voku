@@ -212,17 +212,26 @@ export function uretimeTasi(job) {
 /**
  * Girdi fotoğrafını job klasörüne hazırlar.
  * Önce EXIF yönü uygulanır (telefon fotoğrafları çoğu zaman dönük saklanır),
- * sonra kare/dikey hale getirilir: **yatay görsel (genişlik > yükseklik)
- * saat yönünde 90° döndürülür.** Üretim böylece hep dikey çerçeveden başlar.
+ * sonra kare/dikey hale getirilir: fotoğraf **belirgin biçimde yatay** ise
+ * (genişlik/yükseklik ≥ `yatayEsigi`) saat yönünde 90° döndürülür. Üretim
+ * böylece hep dikey çerçeveden başlar.
+ *
+ * Eşik neden var: 1 piksel bile geniş olan (kareye çok yakın) fotoğraflar
+ * yatay sayılıp gereksiz döndürülüyordu. Varsayılan 1.2 = genişlik en az %20
+ * fazla olmalı; `settings.json > girdiYatayOrani` ile değiştirilebilir.
  *
  * @returns {Promise<{dondu: boolean, genislik: number, yukseklik: number}>}
  */
-export async function girdiyiHazirla(kaynakYol, hedefYol) {
+export async function girdiyiHazirla(kaynakYol, hedefYol, { yatayEsigi = 1.2 } = {}) {
   const { data, info } = await sharp(kaynakYol)
     .rotate() // EXIF orientation
     .toBuffer({ resolveWithObject: true });
 
-  if (info.width <= info.height) {
+  const oran = info.width / info.height;
+  const esik = Number(yatayEsigi) > 1 ? Number(yatayEsigi) : 1.2;
+
+  if (oran < esik) {
+    // Dikey ya da kareye yakın — döndürme yok.
     fs.writeFileSync(hedefYol, data);
     return { dondu: false, genislik: info.width, yukseklik: info.height };
   }

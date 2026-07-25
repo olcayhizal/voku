@@ -173,6 +173,7 @@ async function komutNew(opsiyon, ayarlar) {
     phone: opsiyon.phone === true ? null : opsiyon.phone,
     prompts: promptlar,
     note: opsiyon.note === true ? null : opsiyon.note,
+    yatayEsigi: ayarlar.girdiYatayOrani,
   });
   log.ok(`Job oluşturuldu: ${job.id}`);
   log.info(`  telefon : ${job.phone || `(yok → ${job.fakeId})`}`);

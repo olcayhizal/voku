@@ -448,6 +448,7 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
           prompts: promptlar,
           note: not || taslak.kullanici,
           kaynak: 'telegram',
+          yatayEsigi: ayarlar.girdiYatayOrani,
           kaynakBilgi: {
             chatId: taslak.chatId,
             mesajId: foto.mesajId,
