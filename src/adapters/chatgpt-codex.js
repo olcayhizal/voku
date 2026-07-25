@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { komutCagrisi } from '../platform.js';
+import { log } from '../logger.js';
 
 export const ad = 'chatgpt-codex';
 export const tarayiciGerekli = false;
