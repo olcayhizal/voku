@@ -28,3 +28,4 @@ jobs/.havuz.json
 .oturum-test.mjs
 .*-test.mjs
 config/settings.json
+__pycache__/
