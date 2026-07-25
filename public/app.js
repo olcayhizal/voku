@@ -1063,13 +1063,45 @@ function oturumRozeti(p) {
 }
 
 /** Süreçli giriş (Codex): canlı çıktı + varsa giriş bağlantısı. */
-function surecliGirisGovdesi(p) {
+function surecliGirisGovdesi(platformAd, o) {
   return el('div', { class: 'giris-akis' },
-    el('div', { class: 'oturum-satir', text: p.ipucu || 'Giriş süreci çalışıyor…' }),
-    p.girisUrl
-      ? el('a', { class: 'btn btn-birincil btn-kucuk', href: p.girisUrl, target: '_blank', rel: 'noopener', text: 'Giriş sayfasını aç' })
+    el('div', { class: 'oturum-satir', text: o.ipucu || 'Giriş süreci çalışıyor…' }),
+    o.girisUrl
+      ? el('a', { class: 'btn btn-birincil btn-kucuk', href: o.girisUrl, target: '_blank', rel: 'noopener', text: 'Giriş sayfasını aç' })
       : null,
-    el('pre', { class: 'giris-cikti', id: `girisCikti-${p.ad}`, text: p.girisCikti || 'çıktı bekleniyor…' })
+    el('pre', { class: 'giris-cikti', id: `girisCikti-${platformAd}-${o.hesap}`, text: o.girisCikti || 'çıktı bekleniyor…' })
+  );
+}
+
+/** Tek bir hesabın oturum satırı (giriş + havuz durumu + eylemler). */
+function hesapKarti(p, o) {
+  const dinlenme = o.dinlenmede ? `limitte · ${saatKisa(o.dinlenmeSonu)}'e kadar` : null;
+  return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}` },
+    el('div', { class: 'hesap-ust' },
+      el('span', { class: 'hesap-ad' }, el('span', { class: 'hesap-nokta' }), o.hesap),
+      el('span', { class: 'oturum-rozet', text: dinlenme || oturumRozeti(o) })
+    ),
+    o.dogrulama ? el('div', { class: 'oturum-satir', text: o.dogrulama.mesaj }) : null,
+    !o.dogrulama && o.sonGiris ? el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(o.sonGiris)}` }) : null,
+    !o.dinlenmede && o.aktifSlot > 0
+      ? el('div', { class: 'oturum-satir', text: `çalışıyor (${o.aktifSlot}/${o.kapasite})` })
+      : null,
+    el('div', { class: 'oturum-eylem' },
+      o.girisSuruyor
+        ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Vazgeç', onclick: () => girisIptal(p.ad, o.hesap) })
+        : o.pencereAcik
+          ? el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Girişi tamamladım', onclick: () => loginBitir(p.ad, o.hesap) })
+          : el('button', { class: 'btn btn-ikincil btn-kucuk', text: o.profilVar ? 'Yeniden giriş' : 'Giriş yap', onclick: () => loginBaslat(p.ad, o.hesap) }),
+      el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Sına', disabled: o.pencereAcik || o.girisSuruyor, onclick: (e) => oturumSina(p.ad, o.hesap, e.target) }),
+      // Son hesap silinemez.
+      p.cokluHesap
+        ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Sil', onclick: () => hesapSil(p.ad, o.hesap) })
+        : null
+    ),
+    o.girisSuruyor ? surecliGirisGovdesi(p.ad, o) : null,
+    o.pencereAcik
+      ? el('p', { class: 'alt-metin', text: 'Tarayıcı penceresi açıldı. Girişi orada tamamla, sonra "Girişi tamamladım"a bas.' })
+      : null
   );
 }
 
@@ -1078,46 +1110,22 @@ function oturumlariCiz() {
   kap.replaceChildren();
 
   for (const p of state.platformlar) {
-    const kart = el('div', { class: `oturum-kart ${oturumSinifi(p)}` },
+    const oturumlar = p.oturumlar || [p];
+    const kart = el('div', { class: 'oturum-kart' },
       el('div', { class: 'oturum-ust' },
         el('h3', { text: PLATFORM_ETIKET[p.ad] || p.ad }),
-        el('span', { class: 'oturum-rozet', text: oturumRozeti(p) })
+        el('span', {
+          class: 'oturum-rozet',
+          text: p.girisTipi === 'surec' ? `${p.adapter} · codex` : (p.adapter || p.ad),
+        })
       ),
-      el('div', { class: 'oturum-satir', text: p.girisTipi === 'surec' ? `sürücü: ${p.adapter} · codex login` : p.url }),
-      el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(p.sonGiris)}` }),
-      p.dogrulama ? el('div', { class: 'oturum-satir', text: p.dogrulama.mesaj }) : null,
-      // Çoklu hesap havuzu: her hesabın anlık durumu (aktif / dinlenmede).
-      (p.hesaplar || []).length > 1
-        ? el('div', { class: 'havuz-durum' },
-            el('div', { class: 'oturum-satir', text: `${p.hesaplar.length} hesap havuzu` }),
-            ...p.hesaplar.map((h) =>
-              el('div', { class: `havuz-hesap${h.dinlenmede ? ' dinlenmede' : ''}` },
-                el('span', { class: 'havuz-nokta' }),
-                el('span', { class: 'havuz-ad', text: h.ad }),
-                el('span', {
-                  class: 'havuz-bilgi',
-                  text: h.dinlenmede
-                    ? `limitte · ${saatKisa(h.dinlenmeSonu)}'e kadar`
-                    : h.aktifSlot > 0
-                      ? `çalışıyor (${h.aktifSlot}/${h.kapasite})`
-                      : 'hazır',
-                })
-              )
-            )
-          )
-        : null,
-      el('div', { class: 'oturum-eylem' },
-        p.girisSuruyor
-          ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Vazgeç', onclick: () => girisIptal(p.ad) })
-          : p.pencereAcik
-            ? el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Girişi tamamladım', onclick: () => loginBitir(p.ad) })
-            : el('button', { class: 'btn btn-ikincil btn-kucuk', text: p.profilVar ? 'Yeniden giriş yap' : 'Giriş yap', onclick: () => loginBaslat(p.ad) }),
-        el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Oturumu sına', disabled: p.pencereAcik || p.girisSuruyor, onclick: (e) => oturumSina(p.ad, e.target) })
-      ),
-      p.girisSuruyor ? surecliGirisGovdesi(p) : null,
-      p.pencereAcik
-        ? el('p', { class: 'alt-metin', text: 'Tarayıcı penceresi açıldı. Girişi orada tamamla, sonra bu düğmeye bas — oturum profile yazılır.' })
-        : null
+      el('div', { class: 'hesap-listesi' }, ...oturumlar.map((o) => hesapKarti(p, o))),
+      el('button', {
+        class: 'btn btn-ekle btn-kucuk',
+        text: '+ Hesap ekle',
+        title: 'Bu platforma yeni bir hesap ekle (havuza katılır)',
+        onclick: () => hesapEkle(p.ad),
+      })
     );
     kap.append(kart);
   }
@@ -1198,17 +1206,22 @@ function oturumlariCiz() {
   );
 }
 
-async function loginBaslat(ad) {
+/** Bir platform+hesap için oturum objesini state'te bulur. */
+function oturumBul(ad, hesap) {
+  const p = state.platformlar.find((x) => x.ad === ad);
+  if (!p) return null;
+  return (p.oturumlar || []).find((o) => o.hesap === hesap) || null;
+}
+
+const hesapQuery = (hesap) => (hesap ? `?hesap=${encodeURIComponent(hesap)}` : '');
+
+async function loginBaslat(ad, hesap) {
   try {
-    const yanit = await api(`/api/login/${ad}/start`, { method: 'POST' });
-    const p = state.platformlar.find((x) => x.ad === ad);
-    if (p) {
-      if (yanit.surecli) {
-        p.girisSuruyor = true;
-        p.girisCikti = '';
-      } else {
-        p.pencereAcik = true;
-      }
+    const yanit = await api(`/api/login/${ad}/start${hesapQuery(hesap)}`, { method: 'POST' });
+    const o = oturumBul(ad, hesap);
+    if (o) {
+      if (yanit.surecli) { o.girisSuruyor = true; o.girisCikti = ''; }
+      else o.pencereAcik = true;
     }
     oturumlariCiz();
   } catch (e) {
@@ -1216,43 +1229,65 @@ async function loginBaslat(ad) {
   }
 }
 
-async function girisIptal(ad) {
+async function girisIptal(ad, hesap) {
   try {
-    await api(`/api/login/${ad}/cancel`, { method: 'POST' });
+    await api(`/api/login/${ad}/cancel${hesapQuery(hesap)}`, { method: 'POST' });
   } catch (e) {
     alert(e.message);
   }
-  const p = state.platformlar.find((x) => x.ad === ad);
-  if (p) p.girisSuruyor = false;
+  const o = oturumBul(ad, hesap);
+  if (o) o.girisSuruyor = false;
   oturumlariCiz();
 }
 
-async function loginBitir(ad) {
+async function loginBitir(ad, hesap) {
   try {
-    const yanit = await api(`/api/login/${ad}/finish`, { method: 'POST' });
+    const yanit = await api(`/api/login/${ad}/finish${hesapQuery(hesap)}`, { method: 'POST' });
     const i = state.platformlar.findIndex((x) => x.ad === ad);
     if (i >= 0) state.platformlar[i] = yanit.platform;
     oturumlariCiz();
-    oturumSina(ad);
+    oturumSina(ad, hesap);
   } catch (e) {
     alert(e.message);
   }
 }
 
-async function oturumSina(ad, dugme) {
-  if (dugme) {
-    dugme.disabled = true;
-    dugme.textContent = 'Sınanıyor…';
-  }
+async function oturumSina(ad, hesap, dugme) {
+  if (dugme) { dugme.disabled = true; dugme.textContent = 'Sınanıyor…'; }
   try {
-    const sonuc = await api(`/api/login/${ad}/verify`, { method: 'POST' });
-    const p = state.platformlar.find((x) => x.ad === ad);
-    if (p) p.dogrulama = sonuc;
+    const sonuc = await api(`/api/login/${ad}/verify${hesapQuery(hesap)}`, { method: 'POST' });
+    const o = oturumBul(ad, hesap);
+    if (o) o.dogrulama = sonuc;
   } catch (e) {
-    const p = state.platformlar.find((x) => x.ad === ad);
-    if (p) p.dogrulama = { hazir: false, mesaj: e.message, kontrol: new Date().toISOString() };
+    const o = oturumBul(ad, hesap);
+    if (o) o.dogrulama = { hazir: false, mesaj: e.message, kontrol: new Date().toISOString() };
   }
   oturumlariCiz();
+}
+
+async function hesapEkle(ad) {
+  const isim = prompt('Yeni hesap adı (örn: onur):');
+  if (!isim || !isim.trim()) return;
+  try {
+    const yanit = await api(`/api/hesap/${ad}`, { method: 'POST', body: { ad: isim.trim() } });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function hesapSil(ad, hesap) {
+  if (!confirm(`"${hesap}" hesabı havuzdan çıkarılsın mı? (oturum dosyaları kalır)`)) return;
+  try {
+    const yanit = await api(`/api/hesap/${ad}/${encodeURIComponent(hesap)}`, { method: 'DELETE' });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 /* ================= BASKI ODASI ================= */
@@ -1549,23 +1584,23 @@ function akisiBagla() {
       if (state.seciliJob === veri.id) jobDetayCiz();
     }
     if (tip === 'giris') {
-      const p = state.platformlar.find((x) => x.ad === veri.platform);
-      if (!p) return;
+      const o = oturumBul(veri.platform, veri.hesap || 'varsayılan');
+      if (!o) return;
       if (veri.bitti) {
-        p.girisSuruyor = false;
-        p.girisCikti = null;
-        p.girisUrl = null;
+        o.girisSuruyor = false;
+        o.girisCikti = null;
+        o.girisUrl = null;
         oturumlariCiz();
         return;
       }
-      p.girisSuruyor = true;
-      p.girisCikti = ((p.girisCikti || '') + veri.metin).slice(-1200);
-      const yeniUrl = veri.url && veri.url !== p.girisUrl;
-      p.girisUrl = veri.url || p.girisUrl;
+      o.girisSuruyor = true;
+      o.girisCikti = ((o.girisCikti || '') + veri.metin).slice(-1200);
+      const yeniUrl = veri.url && veri.url !== o.girisUrl;
+      o.girisUrl = veri.url || o.girisUrl;
       // Sadece çıktı akıyorsa kutuyu güncelle; URL gelince kartı yeniden çiz.
-      const kutu = document.getElementById(`girisCikti-${p.ad}`);
+      const kutu = document.getElementById(`girisCikti-${veri.platform}-${o.hesap}`);
       if (kutu && !yeniUrl) {
-        kutu.textContent = p.girisCikti;
+        kutu.textContent = o.girisCikti;
         kutu.scrollTop = kutu.scrollHeight;
       } else {
         oturumlariCiz();

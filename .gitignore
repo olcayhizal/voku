@@ -24,3 +24,6 @@ config/tunel.json
 
 # Çoklu hesap havuz durumu
 jobs/.havuz.json
+
+.oturum-test.mjs
+.*-test.mjs

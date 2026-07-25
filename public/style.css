@@ -270,20 +270,34 @@ h3 {
 }
 .oturum-lamba.acik i { background: var(--fixer); box-shadow: 0 0 6px rgba(111, 178, 166, 0.6); }
 
-/* Çoklu hesap havuzu — oturum kartında her hesabın durumu */
-.havuz-durum { margin-top: 8px; border-top: 1px solid var(--edge); padding-top: 8px; }
-.havuz-hesap {
-  display: flex; align-items: center; gap: 8px;
-  font-family: var(--mono); font-size: 11px; color: var(--paper-dim);
-  padding: 2px 0;
+/* Çoklu hesap havuzu — her platform kartı içinde hesap kartları */
+.hesap-listesi { display: grid; gap: 8px; margin: 10px 0; }
+.hesap-kart {
+  border: 1px solid var(--edge);
+  border-left: 2px solid var(--edge-parlak);
+  border-radius: var(--r);
+  background: var(--tray-2);
+  padding: 9px 11px;
 }
-.havuz-nokta {
-  width: 6px; height: 6px; border-radius: 50%; flex: none;
-  background: var(--fixer); box-shadow: 0 0 5px rgba(111, 178, 166, 0.5);
+.hesap-kart.acik { border-left-color: var(--fixer); }
+.hesap-kart.kapali { border-left-color: var(--grease); }
+.hesap-kart.bekliyor { border-left-color: var(--safelight); }
+.hesap-kart.dinlenmede { border-left-color: var(--safelight); }
+.hesap-ust { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hesap-ad {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--paper);
 }
-.havuz-hesap.dinlenmede .havuz-nokta { background: var(--safelight); box-shadow: none; }
-.havuz-ad { color: var(--paper); min-width: 60px; }
-.havuz-hesap.dinlenmede .havuz-bilgi { color: var(--safelight); }
+.hesap-nokta {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--edge-parlak);
+}
+.hesap-kart.acik .hesap-nokta { background: var(--fixer); box-shadow: 0 0 5px rgba(111, 178, 166, 0.5); }
+.hesap-kart.kapali .hesap-nokta { background: var(--grease); }
+.hesap-kart.bekliyor .hesap-nokta { background: var(--safelight); }
+.hesap-kart.dinlenmede .hesap-nokta { background: var(--safelight); }
+.hesap-kart .oturum-eylem { margin-top: 8px; }
+.btn-ekle.btn-kucuk { padding: 5px 10px; font-size: 12px; }
 
 /* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
 .lamba-link {

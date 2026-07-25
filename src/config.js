@@ -33,6 +33,58 @@ export function ayarlariYukle(dosya) {
   return s;
 }
 
+const AYAR_YOLU = path.join(CONFIG_DIR, 'settings.json');
+
+/** settings.json'u okur (ham, normalize etmeden). */
+function hamAyarOku() {
+  return JSON.parse(fs.readFileSync(AYAR_YOLU, 'utf8'));
+}
+
+function hamAyarYaz(ham) {
+  fs.writeFileSync(AYAR_YOLU, JSON.stringify(ham, null, 2) + '\n');
+}
+
+/**
+ * Panelden hesap ekler: settings.json'a yazar VE çalışan `ayarlar` objesinin
+ * o platformunun hesap listesini yeniden normalize eder (panel yeniden
+ * başlamadan havuz yeni hesabı görsün).
+ */
+export function hesapEkle(ayarlar, platformAdi, hesapAd) {
+  const ad = String(hesapAd || '').trim();
+  if (!ad) throw new Error('Hesap adı boş olamaz.');
+  if (!/^[\w.-]{1,32}$/.test(ad)) throw new Error('Hesap adı yalnız harf/rakam/.-_ olabilir (en çok 32).');
+
+  const ham = hamAyarOku();
+  const plt = ham.platforms?.[platformAdi];
+  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+
+  // Mevcut tek-hesap ayarı liste haline gelirken ilk elemanı "varsayılan"
+  // olarak koru (eski oturum kaybolmasın).
+  if (!Array.isArray(plt.hesaplar) || !plt.hesaplar.length) {
+    plt.hesaplar = [{ ad: 'varsayılan' }];
+  }
+  if (plt.hesaplar.some((h) => h.ad === ad)) throw new Error(`"${ad}" hesabı zaten var.`);
+  plt.hesaplar.push({ ad });
+  hamAyarYaz(ham);
+
+  ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
+  return ayarlar.platforms[platformAdi].hesaplar.find((h) => h.ad === ad);
+}
+
+/** Panelden hesap siler (en az bir hesap kalmalı). */
+export function hesapSil(ayarlar, platformAdi, hesapAd) {
+  const ham = hamAyarOku();
+  const plt = ham.platforms?.[platformAdi];
+  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  const liste = Array.isArray(plt.hesaplar) ? plt.hesaplar : [];
+  if (liste.length <= 1) throw new Error('Son hesap silinemez — en az bir hesap kalmalı.');
+  const kalan = liste.filter((h) => h.ad !== hesapAd);
+  if (kalan.length === liste.length) throw new Error(`"${hesapAd}" hesabı yok.`);
+  plt.hesaplar = kalan;
+  hamAyarYaz(ham);
+  ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
+}
+
 /**
  * Bir platformun hesap listesini üretir. `hesaplar` tanımlıysa çoklu havuz;
  * yoksa mevcut tek-hesap ayarları tek elemanlı listeye sarılır (geriye uyum —

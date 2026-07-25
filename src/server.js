@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, OUTPUT_DIR } from './paths.js';
-import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu } from './config.js';
+import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil } from './config.js';
 import { jobOlustur, waLinki, kaynakNormalize } from './job.js';
 import {
   jobOku,
@@ -45,12 +45,24 @@ const MIME = {
 /** Panel süreç durumu: hangi job koşuyor, hangi login penceresi açık. */
 const durum = {
   kosanJoblar: new Set(),
-  loginContextleri: new Map(), // platform → { ctx, baslangic }   (tarayıcılı giriş)
-  girisSurecleri: new Map(), // platform → { surec, satirlar, url } (süreçli giriş)
+  loginContextleri: new Map(), // "plt::hesap" → { ctx, baslangic }  (tarayıcılı giriş)
+  girisSurecleri: new Map(), // "plt::hesap" → { surec, satirlar, url } (süreçli giriş)
   durdurucular: new Map(), // jobId → AbortController
-  dogrulama: new Map(), // platform → { hazir, kontrol, mesaj }
+  dogrulama: new Map(), // "plt::hesap" → { hazir, kontrol, mesaj }
   telegram: null, // { durum(), durdur() } — bot açıksa
 };
+
+/** Oturum haritalarında hesabı ayırt eden anahtar. */
+function hesapAnahtar(platformAdi, hesapAd) {
+  return `${platformAdi}::${hesapAd || 'varsayılan'}`;
+}
+
+/** Platformun hesabını ad ile bulur; ad yoksa/tek hesapsa ilkini verir. */
+function hesapBul(platform, hesapAd) {
+  const liste = platform.hesaplar || [];
+  if (!hesapAd) return liste[0];
+  return liste.find((h) => h.ad === hesapAd) || null;
+}
 
 const sseIstemcileri = new Set();
 
@@ -118,33 +130,31 @@ async function govdeOku(req, limitMb = 40) {
   return JSON.parse(Buffer.concat(parcalar).toString('utf8'));
 }
 
-/** Oturum profili var mı, ne zaman kaydedildi? */
-function oturumDurumu(platform) {
+/** Bir hesabın oturum durumu (giriş yapılmış mı, giriş süreci akıyor mu). */
+function oturumDurumu(platform, hesap) {
   const adaptor = adaptorAl(platform.adapter || platform.ad);
-  const surecKaydi = durum.girisSurecleri.get(platform.ad);
+  const anahtar = hesapAnahtar(platform.ad, hesap?.ad);
+  const surecKaydi = durum.girisSurecleri.get(anahtar);
   const ortak = {
-    ad: platform.ad,
-    url: platform.url,
-    enabled: platform.enabled !== false,
-    adapter: platform.adapter || platform.ad,
+    hesap: hesap?.ad || 'varsayılan',
     girisTipi: adaptor.girisTipi || 'tarayici',
-    dogrulama: durum.dogrulama.get(platform.ad) || null,
+    dogrulama: durum.dogrulama.get(anahtar) || null,
     girisSuruyor: Boolean(surecKaydi),
     girisUrl: surecKaydi?.url || null,
     girisCikti: surecKaydi ? surecKaydi.satirlar.slice(-8).join('') : null,
-    ipucu: adaptor.girisKomutu?.(platform)?.ipucu || null,
+    ipucu: adaptor.girisKomutu?.(platform, hesap)?.ipucu || null,
   };
 
   // Sürücü kendi giriş durumunu biliyorsa (Codex) onu kullan.
   if (typeof adaptor.girisDurumu === 'function') {
-    return { ...ortak, ...adaptor.girisDurumu(platform), pencereAcik: false };
+    return { ...ortak, ...adaptor.girisDurumu(platform, hesap), pencereAcik: false };
   }
 
-  const profil = platform.profileDir;
-  const damga = path.join(profil, '.voku-login.json');
-  const varMi = fs.existsSync(path.join(profil, 'Default')) || fs.existsSync(damga);
+  const profil = hesap?.profileDir || platform.profileDir;
+  const damga = profil ? path.join(profil, '.voku-login.json') : null;
+  const varMi = profil && (fs.existsSync(path.join(profil, 'Default')) || fs.existsSync(damga));
   let sonGiris = null;
-  if (fs.existsSync(damga)) {
+  if (damga && fs.existsSync(damga)) {
     try {
       sonGiris = JSON.parse(fs.readFileSync(damga, 'utf8')).sonGiris;
     } catch {
@@ -155,17 +165,37 @@ function oturumDurumu(platform) {
     ...ortak,
     profilVar: varMi,
     sonGiris,
-    pencereAcik: durum.loginContextleri.has(platform.ad),
+    pencereAcik: durum.loginContextleri.has(anahtar),
+  };
+}
+
+/** Bir platformun tüm hesaplarının oturum + havuz durumunu birleştirir. */
+function platformDurumu(platform) {
+  const adaptor = adaptorAl(platform.adapter || platform.ad);
+  const havuz = havuzOzeti(platform.ad, platform.hesaplar || []);
+  const oturumlar = (platform.hesaplar || []).map((h) => {
+    const o = oturumDurumu(platform, h);
+    const hv = havuz.find((x) => x.ad === h.ad) || {};
+    return { ...o, ...hv };
+  });
+  return {
+    // Bar lambası tek-oturum alanlarını (pencereAcik/dogrulama/profilVar)
+    // ilk hesaptan okur — önce yayılır, sonra platform alanları ezer.
+    ...oturumlar[0],
+    ad: platform.ad,
+    url: platform.url,
+    enabled: platform.enabled !== false,
+    adapter: platform.adapter || platform.ad,
+    girisTipi: adaptor.girisTipi || 'tarayici',
+    cokluHesap: (platform.hesaplar || []).length > 1,
+    oturumlar,
+    hesaplar: havuz,
   };
 }
 
 function durumPaketi(ayarlar) {
   return {
-    platformlar: Object.values(ayarlar.platforms).map((p) => ({
-      ...oturumDurumu(p),
-      // Çoklu hesap havuzunun anlık durumu: hangi hesap aktif/dinlenmede.
-      hesaplar: havuzOzeti(p.ad, p.hesaplar || []),
-    })),
+    platformlar: Object.values(ayarlar.platforms).map(platformDurumu),
     joblar: jobListele().map(jobOzet).reverse(),
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
     promptDosyasi: path.relative(ROOT, promptDosyaYolu()),
@@ -209,33 +239,38 @@ function jobuDurdur(jobId) {
  * Süreçli giriş (Codex): `codex login` alt süreç olarak koşar, çıktısı
  * panele canlı akar, URL yakalanır. Süreç kendi bitince otomatik doğrulanır.
  */
-async function surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar) {
-  if (durum.girisSurecleri.has(platformAdi)) return { zatenAcik: true };
+async function surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar, hesap) {
+  const anahtar = hesapAnahtar(platformAdi, hesap?.ad);
+  const etiket = `${platformAdi}/${hesap?.ad || 'varsayılan'}`;
+  if (durum.girisSurecleri.has(anahtar)) return { zatenAcik: true };
 
-  const { komut, argumanlar } = adaptor.girisKomutu(platform);
-  const surec = spawn(komut, argumanlar, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const { komut, argumanlar, env } = adaptor.girisKomutu(platform, hesap);
+  // Codex, CODEX_HOME dizini önceden yoksa "path does not exist" ile ölüyor.
+  if (env?.CODEX_HOME) fs.mkdirSync(env.CODEX_HOME, { recursive: true });
+  const surec = spawn(komut, argumanlar, {
+    env: { ...process.env, ...(env || {}) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   const kayit = { surec, satirlar: [], url: null };
-  durum.girisSurecleri.set(platformAdi, kayit);
-  log.info(`[${platformAdi}] giriş başlatıldı: ${komut} ${argumanlar.join(' ')}`);
+  durum.girisSurecleri.set(anahtar, kayit);
+  log.info(`[${etiket}] giriş başlatıldı: ${komut} ${argumanlar.join(' ')}`);
+
+  const yay = (veri) =>
+    yayinla('giris', { platform: platformAdi, hesap: hesap?.ad || 'varsayılan', ...veri });
 
   // Program yoksa ChildProcess 'error' fırlatır; yakalanmazsa Node bunu
-  // işlenmemiş olay sayıp TÜM paneli düşürür. Eksik bir CLI yüzünden kuyruk
-  // ve Telegram botu ölmemeli — hata karta yazılır, panel ayakta kalır.
+  // işlenmemiş olay sayıp TÜM paneli düşürür. Panel ayakta kalmalı.
   surec.on('error', (e) => {
-    durum.girisSurecleri.delete(platformAdi);
+    durum.girisSurecleri.delete(anahtar);
     const mesaj =
       e.code === 'ENOENT'
         ? `"${komut}" bulunamadı. Codex CLI kurulu değil ya da PATH'te değil — kurmak için: npm install -g @openai/codex (kurduktan sonra paneli yeniden başlat).`
         : e.message;
-    log.err(`[${platformAdi}] giriş başlatılamadı: ${mesaj}`);
-    yayinla('giris', { platform: platformAdi, metin: `${mesaj}\n` });
-    yayinla('giris', { platform: platformAdi, bitti: true, kod: -1 });
-    durum.dogrulama.set(platformAdi, {
-      hazir: false,
-      kontrol: new Date().toISOString(),
-      mesaj,
-    });
-    yayinla('platform', oturumDurumu(platform));
+    log.err(`[${etiket}] giriş başlatılamadı: ${mesaj}`);
+    yay({ metin: `${mesaj}\n` });
+    yay({ bitti: true, kod: -1 });
+    durum.dogrulama.set(anahtar, { hazir: false, kontrol: new Date().toISOString(), mesaj });
+    yayinla('platform', platformDurumu(platform));
   });
 
   const isle = (veri) => {
@@ -246,95 +281,97 @@ async function surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar) {
       const bulunan = metin.match(/https?:\/\/\S+/);
       if (bulunan) kayit.url = bulunan[0].replace(/[.,)\]]+$/, '');
     }
-    yayinla('giris', { platform: platformAdi, metin, url: kayit.url });
+    yay({ metin, url: kayit.url });
     const temiz = metin.trim();
-    if (temiz) log.info(`[${platformAdi}] ${temiz.slice(0, 200)}`);
+    if (temiz) log.info(`[${etiket}] ${temiz.slice(0, 200)}`);
   };
   surec.stdout.on('data', isle);
   surec.stderr.on('data', isle);
 
   surec.on('close', async (kod) => {
-    durum.girisSurecleri.delete(platformAdi);
-    if (kod === 0) log.ok(`[${platformAdi}] giriş tamamlandı`);
-    else log.warn(`[${platformAdi}] giriş süreci kapandı (kod ${kod})`);
-    yayinla('giris', { platform: platformAdi, bitti: true, kod });
-    const sonuc = await oturumDogrula(platformAdi, ayarlar).catch((e) => ({
-      hazir: false,
-      kontrol: new Date().toISOString(),
-      mesaj: String(e?.message || e),
-    }));
-    yayinla('platform', { ...oturumDurumu(platform), dogrulama: sonuc });
+    durum.girisSurecleri.delete(anahtar);
+    if (kod === 0) log.ok(`[${etiket}] giriş tamamlandı`);
+    else log.warn(`[${etiket}] giriş süreci kapandı (kod ${kod})`);
+    yay({ bitti: true, kod });
+    await oturumDogrula(platformAdi, ayarlar, hesap).catch(() => {});
+    yayinla('platform', platformDurumu(platform));
   });
 
   return { zatenAcik: false, surecli: true };
 }
 
-async function loginBaslat(platformAdi, ayarlar) {
+async function loginBaslat(platformAdi, ayarlar, hesapAd) {
   const platform = ayarlar.platforms[platformAdi];
   if (!platform) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  const hesap = hesapBul(platform, hesapAd);
+  if (!hesap) throw new Error(`"${platformAdi}" için "${hesapAd}" hesabı yok.`);
+  const anahtar = hesapAnahtar(platformAdi, hesap.ad);
   const adaptor = adaptorAl(platform.adapter || platformAdi);
+
   if (adaptor.girisTipi === 'surec') {
-    return surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar);
+    return surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar, hesap);
   }
-  if (durum.loginContextleri.has(platformAdi)) {
-    return { zatenAcik: true };
-  }
-  const ctx = await contextAc(platform, ayarlar, { headless: false });
+  if (durum.loginContextleri.has(anahtar)) return { zatenAcik: true };
+
+  // Her hesap kendi tarayıcı profilinde açılır (farklı Google oturumu).
+  const profil = hesap.profileDir || platform.profileDir;
+  const ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar, { headless: false });
   const page = await sayfaAl(ctx);
   await page.goto(platform.url, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  durum.loginContextleri.set(platformAdi, { ctx, baslangic: Date.now() });
-  log.info(`[${platformAdi}] giriş penceresi açıldı`);
+  durum.loginContextleri.set(anahtar, { ctx, baslangic: Date.now(), hesap });
+  log.info(`[${platformAdi}/${hesap.ad}] giriş penceresi açıldı`);
   return { zatenAcik: false };
 }
 
 /** Süren giriş sürecini iptal eder ("Vazgeç"). */
-function surecliGirisIptal(platformAdi) {
-  const kayit = durum.girisSurecleri.get(platformAdi);
+function surecliGirisIptal(platformAdi, hesapAd) {
+  const anahtar = hesapAnahtar(platformAdi, hesapAd);
+  const kayit = durum.girisSurecleri.get(anahtar);
   if (!kayit) throw new Error('Süren giriş yok.');
   kayit.surec.kill('SIGTERM');
-  durum.girisSurecleri.delete(platformAdi);
-  log.warn(`[${platformAdi}] giriş iptal edildi`);
+  durum.girisSurecleri.delete(anahtar);
+  log.warn(`[${platformAdi}/${hesapAd || 'varsayılan'}] giriş iptal edildi`);
   return { ok: true };
 }
 
-async function loginBitir(platformAdi, ayarlar) {
-  if (durum.girisSurecleri.has(platformAdi)) {
-    // Süreçli girişte "tamamladım" yok — süreç kendi biter; buraya düşerse iptal.
-    return surecliGirisIptal(platformAdi);
+async function loginBitir(platformAdi, ayarlar, hesapAd) {
+  const anahtar = hesapAnahtar(platformAdi, hesapAd);
+  if (durum.girisSurecleri.has(anahtar)) {
+    return surecliGirisIptal(platformAdi, hesapAd);
   }
-  const kayit = durum.loginContextleri.get(platformAdi);
+  const kayit = durum.loginContextleri.get(anahtar);
   if (!kayit) throw new Error('Açık giriş penceresi yok.');
   const platform = ayarlar.platforms[platformAdi];
+  const hesap = kayit.hesap || hesapBul(platform, hesapAd);
   const adaptor = adaptorAl(platform.adapter || platformAdi);
 
   // Sürücü çerez istiyorsa (HTTP köprüsü) pencere kapanmadan önce al.
   if (typeof adaptor.cerezleriSenkronla === 'function') {
     try {
-      const cerezler = await kayit.ctx.cookies([
-        'https://gemini.google.com',
-        'https://google.com',
-      ]);
-      await adaptor.cerezleriSenkronla(cerezler, platform);
+      const cerezler = await kayit.ctx.cookies(['https://gemini.google.com', 'https://google.com']);
+      await adaptor.cerezleriSenkronla(cerezler, platform, hesap);
     } catch (e) {
-      log.warn(`[${platformAdi}] çerez senkronu başarısız: ${e.message}`);
+      log.warn(`[${platformAdi}/${hesap?.ad}] çerez senkronu başarısız: ${e.message}`);
     }
   }
 
   await kayit.ctx.close().catch(() => {});
-  durum.loginContextleri.delete(platformAdi);
-  fs.mkdirSync(platform.profileDir, { recursive: true });
+  durum.loginContextleri.delete(anahtar);
+  const profil = hesap?.profileDir || platform.profileDir;
+  fs.mkdirSync(profil, { recursive: true });
   fs.writeFileSync(
-    path.join(platform.profileDir, '.voku-login.json'),
+    path.join(profil, '.voku-login.json'),
     JSON.stringify({ sonGiris: new Date().toISOString() }, null, 2)
   );
-  log.ok(`[${platformAdi}] oturum kaydedildi`);
+  log.ok(`[${platformAdi}/${hesap?.ad || 'varsayılan'}] oturum kaydedildi`);
 }
 
-/** Oturumu headless açıp adapter'ın arayüzü tanıyıp tanımadığını sınar. */
-async function oturumDogrula(platformAdi, ayarlar) {
+/** Bir hesabın oturumunu sınar (adapter arayüzü/hazırlığı tanıyor mu). */
+async function oturumDogrula(platformAdi, ayarlar, hesap) {
   const platform = ayarlar.platforms[platformAdi];
   if (!platform) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
-  if (durum.loginContextleri.has(platformAdi)) {
+  const anahtar = hesapAnahtar(platformAdi, hesap?.ad);
+  if (durum.loginContextleri.has(anahtar)) {
     throw new Error('Giriş penceresi açıkken doğrulama yapılamaz. Önce girişi tamamla.');
   }
   const adaptor = adaptorAl(platform.adapter || platformAdi);
@@ -342,31 +379,26 @@ async function oturumDogrula(platformAdi, ayarlar) {
   let ctx;
   try {
     if (adaptor.tarayiciGerekli === false) {
-      // Tarayıcısız sürücü (Codex): tarayıcı açmadan kendi hazırlık kontrolü.
-      await adaptor.hazirla(null, platform, sel, ayarlar);
+      // Tarayıcısız sürücü (Codex/köprü): tarayıcı açmadan hesap hazırlığı.
+      await adaptor.hazirla(null, platform, sel, ayarlar, hesap);
       const sonuc = {
         hazir: true,
         kontrol: new Date().toISOString(),
-        mesaj: `${adaptor.ad} sürücüsü hazır — tarayıcı gerekmiyor.`,
+        mesaj: `${adaptor.ad} — ${hesap?.ad || 'varsayılan'} hazır.`,
       };
-      durum.dogrulama.set(platformAdi, sonuc);
+      durum.dogrulama.set(anahtar, sonuc);
       return sonuc;
     }
-    // Headless AÇILMAZ: ChatGPT/Gemini headless Chrome'u bot kontrolüne sokuyor
-    // ("Bir dakika lütfen…"), oturum açık olsa bile arayüz gelmiyor.
-    ctx = await contextAc(platform, ayarlar, { headless: ayarlar.headless });
+    const profil = hesap?.profileDir || platform.profileDir;
+    ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar, { headless: ayarlar.headless });
     const page = await sayfaAl(ctx);
-    await adaptor.hazirla(page, platform, sel, ayarlar);
+    await adaptor.hazirla(page, platform, sel, ayarlar, hesap);
     const sonuc = { hazir: true, kontrol: new Date().toISOString(), mesaj: 'Oturum açık, arayüz tanındı.' };
-    durum.dogrulama.set(platformAdi, sonuc);
+    durum.dogrulama.set(anahtar, sonuc);
     return sonuc;
   } catch (e) {
-    const sonuc = {
-      hazir: false,
-      kontrol: new Date().toISOString(),
-      mesaj: String(e?.message || e),
-    };
-    durum.dogrulama.set(platformAdi, sonuc);
+    const sonuc = { hazir: false, kontrol: new Date().toISOString(), mesaj: String(e?.message || e) };
+    durum.dogrulama.set(anahtar, sonuc);
     return sonuc;
   } finally {
     if (ctx) await ctx.close().catch(() => {});
@@ -508,22 +540,47 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
   if (parcalar[1] === 'login' && parcalar[2]) {
     const platformAdi = parcalar[2];
     const eylem = parcalar[3];
+    // Hesap adı query'de (?hesap=onur); yoksa ilk hesap.
+    const hesapAd = url.searchParams.get('hesap') || undefined;
     if (req.method !== 'POST') return json(res, 405, { hata: 'POST bekleniyor' });
     try {
-      if (eylem === 'start') return json(res, 200, await loginBaslat(platformAdi, ayarlar));
+      if (eylem === 'start') return json(res, 200, await loginBaslat(platformAdi, ayarlar, hesapAd));
       if (eylem === 'finish') {
-        await loginBitir(platformAdi, ayarlar);
-        return json(res, 200, { ok: true, platform: oturumDurumu(ayarlar.platforms[platformAdi]) });
+        await loginBitir(platformAdi, ayarlar, hesapAd);
+        return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
       }
-      if (eylem === 'cancel') return json(res, 200, surecliGirisIptal(platformAdi));
+      if (eylem === 'cancel') return json(res, 200, surecliGirisIptal(platformAdi, hesapAd));
       if (eylem === 'verify') {
-        const sonuc = await oturumDogrula(platformAdi, ayarlar);
+        const hesap = hesapBul(ayarlar.platforms[platformAdi], hesapAd);
+        const sonuc = await oturumDogrula(platformAdi, ayarlar, hesap);
         return json(res, 200, sonuc);
       }
       return json(res, 404, { hata: 'Bilinmeyen eylem' });
     } catch (e) {
       return json(res, 400, { hata: String(e?.message || e) });
     }
+  }
+
+  // --- hesap havuzu yönetimi ---
+  if (parcalar[1] === 'hesap' && parcalar[2]) {
+    const platformAdi = parcalar[2];
+    try {
+      if (req.method === 'POST') {
+        const govde = await govdeOku(req);
+        const yeni = hesapEkle(ayarlar, platformAdi, govde.ad);
+        log.ok(`[${platformAdi}] hesap eklendi: ${yeni.ad}`);
+        return json(res, 201, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
+      }
+      if (req.method === 'DELETE' && parcalar[3]) {
+        const hesapAd = decodeURIComponent(parcalar[3]);
+        hesapSil(ayarlar, platformAdi, hesapAd);
+        log.warn(`[${platformAdi}] hesap silindi: ${hesapAd}`);
+        return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
+      }
+    } catch (e) {
+      return json(res, 400, { hata: String(e?.message || e) });
+    }
+    return json(res, 404, { hata: 'Bilinmeyen hesap eylemi' });
   }
 
   // --- joblar ---

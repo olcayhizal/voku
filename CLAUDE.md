@@ -144,11 +144,18 @@ pencerede aynı anda doldurup birlikte kilitler).
 - **Limit tespiti:** Codex çıktısından `chatgpt-codex > limitHatasiCoz`
   (ISO `resets_at`, "in 3h 20m", "at 6:34 AM"); Gemini köprüsünde 429 /
   "quota|resource exhausted". Reset okunamazsa muhafazakâr 1 saat cooldown.
-- **Giriş:** her hesaba ayrı — `node src/cli.js login chatgpt --hesap onur`
-  (Codex: o hesabın CODEX_HOME'una `codex login`). Panelde oturum kartında
-  her hesabın durumu (aktif / dinlenmede N'e kadar), bar lambası tooltip'inde
-  özet. *(Panelden hesap-başına giriş düğmeleri henüz yok — hesaplar
-  settings.json'da tanımlanır, giriş şimdilik CLI'dan.)*
+- **Panel yönetimi (Oturumlar sekmesi):** her platform bir kart, içinde her
+  hesap için ayrı satır (giriş durumu + havuz durumu: hazır / çalışıyor N/M /
+  limitte HH:MM'e kadar). Düğmeler: **Giriş yap** (Codex süreçli, canlı çıktı +
+  OAuth linki; Gemini tarayıcı), **Sına**, **Sil**, altta **+ Hesap ekle**.
+  Ekle/sil `/api/hesap/:platform` ile settings.json'a yazar VE çalışan ayarı
+  yeniden normalize eder (panel yeniden başlamadan havuz görür). Son hesap
+  silinemez. CLI karşılığı: `node src/cli.js login chatgpt --hesap onur`.
+  *Codex tuzağı:* `CODEX_HOME` dizini önceden yoksa `codex login` "path does
+  not exist" ile ölüyor — server giriş öncesi dizini oluşturur.
+- **Oturum haritaları hesap-anahtarlı** (`plt::hesap`): girisSurecleri,
+  loginContextleri, dogrulama. SSE 'giris' olayı `hesap` alanı taşır; her
+  hesabın canlı çıktı kutusu ayrı (`girisCikti-<plt>-<hesap>`).
 
 ## İş kaynakları: panel / telegram
 Her job bir **kaynak** taşır (`job.kaynak`, manifest'te de var):
