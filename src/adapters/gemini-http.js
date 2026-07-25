@@ -212,7 +212,16 @@ export function koprulariDurdur() {
  * Panel "Giriş yap" akışını tamamladığında çağrılır.
  */
 export async function cerezleriSenkronla(cerezler, platform, hesap) {
-  const bul = (isim) => cerezler.find((c) => c.name === isim)?.value || null;
+  // Aynı isimde birden fazla çerez olabilir (.google.com vs gemini.google.com;
+  // farklı path). En uzun değeri seç — kısa/eski kopyalar geçersiz oluyor
+  // (PSIDTS=81b gibi kırpık değerler 401'e yol açıyordu). Google hesabı
+  // (accounts.google.com) çerezlerini ele, Gemini/google domaininde kal.
+  const bul = (isim) => {
+    const adaylar = cerezler
+      .filter((c) => c.name === isim && c.value && !/accounts\.google/.test(c.domain || ''))
+      .sort((a, b) => b.value.length - a.value.length);
+    return adaylar[0]?.value || cerezler.find((c) => c.name === isim)?.value || null;
+  };
   const psid = bul('__Secure-1PSID');
   const psidts = bul('__Secure-1PSIDTS');
 
