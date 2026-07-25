@@ -1077,19 +1077,39 @@ function surecliGirisGovdesi(platformAd, o) {
   );
 }
 
+/** Kalan süreyi "23 dk" / "1 sa 05 dk" olarak yazar. */
+function kalanSure(ms) {
+  const dk = Math.max(0, Math.round((ms - Date.now()) / 60000));
+  if (dk < 60) return `${dk} dk`;
+  return `${Math.floor(dk / 60)} sa ${String(dk % 60).padStart(2, '0')} dk`;
+}
+
+/**
+ * Bir hesabın havuz durumu — üretim sırasında kimin kullanıldığı, kimin
+ * sırada beklediği, limittekinin ne kadarı kaldığı.
+ */
+function havuzRozeti(o, sirada) {
+  if (o.dinlenmede) {
+    return { sinif: 'havuz-limitte', text: `limitte · ${kalanSure(o.dinlenmeSonu)} kaldı (${saatKisa(o.dinlenmeSonu)})` };
+  }
+  if (o.aktifSlot > 0) return { sinif: 'havuz-aktif', text: `üretimde · ${o.aktifSlot}/${o.kapasite} slot` };
+  if (sirada) return { sinif: 'havuz-sirada', text: 'sırada — bir sonraki iş bu hesaptan' };
+  return { sinif: 'havuz-hazir', text: 'hazır' };
+}
+
 /** Tek bir hesabın oturum satırı (giriş + havuz durumu + eylemler). */
-function hesapKarti(p, o) {
-  const dinlenme = o.dinlenmede ? `limitte · ${saatKisa(o.dinlenmeSonu)}'e kadar` : null;
-  return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}` },
+function hesapKarti(p, o, sirada) {
+  const hd = havuzRozeti(o, sirada);
+  return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}${sirada ? ' sirada' : ''}` },
     el('div', { class: 'hesap-ust' },
       el('span', { class: 'hesap-ad' }, el('span', { class: 'hesap-nokta' }), o.hesap),
-      el('span', { class: 'oturum-rozet', text: dinlenme || oturumRozeti(o) })
+      el('span', { class: 'oturum-rozet', text: oturumRozeti(o) })
     ),
+    // Havuz durumu: üretimde / sırada / limitte kaç dk kaldı.
+    el('div', { class: `havuz-satir ${hd.sinif}` }, hd.text),
+    o.dinlenmede && o.sonHata ? el('div', { class: 'oturum-satir', text: o.sonHata.slice(0, 90) }) : null,
     o.dogrulama ? el('div', { class: 'oturum-satir', text: o.dogrulama.mesaj }) : null,
     !o.dogrulama && o.sonGiris ? el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(o.sonGiris)}` }) : null,
-    !o.dinlenmede && o.aktifSlot > 0
-      ? el('div', { class: 'oturum-satir', text: `çalışıyor (${o.aktifSlot}/${o.kapasite})` })
-      : null,
     el('div', { class: 'oturum-eylem' },
       o.girisSuruyor
         ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Vazgeç', onclick: () => girisIptal(p.ad, o.hesap) })
@@ -1115,6 +1135,12 @@ function oturumlariCiz() {
 
   for (const p of state.platformlar) {
     const oturumlar = p.oturumlar || [p];
+    // Failover sırası: üretim, dinlenmede olmayan ilk uygun hesabı kullanır.
+    // O anda çalışan hesap yoksa "sırada" olan bir sonraki kullanılacaktır.
+    const calisanVar = oturumlar.some((o) => o.aktifSlot > 0);
+    const siradakiAd = calisanVar
+      ? null
+      : oturumlar.find((o) => !o.dinlenmede && (o.aktifSlot || 0) < (o.kapasite || 1))?.hesap;
     const kart = el('div', { class: 'oturum-kart' },
       el('div', { class: 'oturum-ust' },
         el('h3', { text: PLATFORM_ETIKET[p.ad] || p.ad }),
@@ -1123,7 +1149,7 @@ function oturumlariCiz() {
           text: p.girisTipi === 'surec' ? `${p.adapter} · codex` : (p.adapter || p.ad),
         })
       ),
-      el('div', { class: 'hesap-listesi' }, ...oturumlar.map((o) => hesapKarti(p, o))),
+      el('div', { class: 'hesap-listesi' }, ...oturumlar.map((o) => hesapKarti(p, o, o.hesap === siradakiAd))),
       el('button', {
         class: 'btn btn-ekle btn-kucuk',
         text: '+ Hesap ekle',
@@ -1702,6 +1728,15 @@ async function baslat() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') durumuTazele();
   });
+
+  // Oturumlar sekmesinde limitte hesap varken geri sayım canlı kalsın:
+  // sunucuya gitmeden (dinlenmeSonu sabit) 20 sn'de bir yeniden çiz.
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if ($('#view-oturumlar').classList.contains('gizli')) return;
+    const limitVar = state.platformlar.some((p) => (p.oturumlar || []).some((o) => o.dinlenmede));
+    if (limitVar) oturumlariCiz();
+  }, 20000);
 }
 
 baslat().catch((e) => {

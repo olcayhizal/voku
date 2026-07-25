@@ -302,6 +302,21 @@ h3 {
 /* Limit bekleyen kare: reset saatinde otomatik sürecek */
 .kare-limit { color: var(--safelight); }
 
+/* Hesap havuz durumu satırı — üretimde / sırada / limitte kaç dk */
+.havuz-satir {
+  margin: 6px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.havuz-hazir { color: var(--paper-dim); }
+.havuz-aktif { color: var(--fixer); background: color-mix(in srgb, var(--fixer) 12%, transparent); }
+.havuz-sirada { color: var(--safelight); background: color-mix(in srgb, var(--safelight) 12%, transparent); }
+.havuz-limitte { color: var(--safelight); background: color-mix(in srgb, var(--safelight) 12%, transparent); }
+.hesap-kart.sirada { border-left-color: var(--safelight); }
+
 /* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
 .lamba-link {
   margin-left: 5px;

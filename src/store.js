@@ -37,8 +37,11 @@ export function jobListele() {
   if (!fs.existsSync(JOBS_DIR)) return [];
   return fs
     .readdirSync(JOBS_DIR)
-    .filter((f) => f.endsWith('.json'))
+    // Nokta ile başlayan dosyalar iş değil (.havuz.json, .telegram.lock).
+    .filter((f) => f.endsWith('.json') && !f.startsWith('.'))
     .map((f) => JSON.parse(fs.readFileSync(path.join(JOBS_DIR, f), 'utf8')))
+    // Yalnız gerçek job'lar (tasks dizisi olan) — bozuk/yabancı dosya atlanır.
+    .filter((j) => Array.isArray(j.tasks))
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
