@@ -260,6 +260,26 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
       `[PSID=${psid.length}b PSIDTS=${psidts.length}b sidts-öneki=${psidts.startsWith('sidts-')}]`
   );
 
+  // Aynı Google hesabı iki voku hesabına bağlanmasın: iki köprü aynı oturumun
+  // PSIDTS'ini dönüşümlü tazeleyip birbirini sürekli geçersiz kılar
+  // ("cookies invalid" döngüsü — tarayıcıda oturum sağlam görünürken).
+  // PSID oturumun kimliğidir; başka bir hesabın .env'inde aynı PSID varsa
+  // kullanıcı aynı Google hesabıyla giriş yapmış demektir.
+  const benimEnv = path.resolve(envYolu(hesap));
+  for (const dosyaAdi of fs
+    .readdirSync(SERVIS_DIZINI)
+    .filter((f) => (f === '.env' || f.startsWith('.env.')) && f !== '.env.example')) {
+    const tam = path.join(SERVIS_DIZINI, dosyaAdi);
+    if (path.resolve(tam) === benimEnv) continue;
+    const digeri = envDegiskenleri(tam);
+    if (digeri.GEMINI_1PSID && digeri.GEMINI_1PSID === psid) {
+      const kim = dosyaAdi === '.env' ? 'varsayılan' : dosyaAdi.slice('.env.'.length);
+      throw new Error(
+        `Bu Google hesabı zaten "${kim}" voku hesabına bağlı. İki köprü aynı oturumu dönüşümlü tazeleyip birbirini bozar — "${hesap?.ad || 'bu hesap'}" için FARKLI bir Google hesabıyla giriş yap (açılan pencerede önce mevcut hesaptan çıkış yap).`
+      );
+    }
+  }
+
   const dosya = envYolu(hesap);
   const port = portu(platform, hesap);
   // Regex-replace'ten VAZGEÇİLDİ (Windows CRLF + değerdeki özel karakterlerde

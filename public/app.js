@@ -1090,7 +1090,13 @@ function kalanSure(ms) {
  */
 function havuzRozeti(o, sirada) {
   if (o.dinlenmede) {
-    return { sinif: 'havuz-limitte', text: `limitte · ${kalanSure(o.dinlenmeSonu)} kaldı (${saatKisa(o.dinlenmeSonu)})` };
+    // İki farklı bekleme var ve karışmamalı: gerçek kota limiti vs oturum
+    // sorunu (çerez ölmüş / hazırlık başarısız). İkincisi "limitte" diye
+    // gösterilince kullanıcı kota sanıyor — oysa çözüm yeniden giriş.
+    const oturumSorunu = /oturum|çerez|hazırlık/i.test(o.sonHata || '');
+    return oturumSorunu
+      ? { sinif: 'havuz-limitte', text: `oturum sorunu — yeniden giriş gerek (${kalanSure(o.dinlenmeSonu)} sonra tekrar denenir)` }
+      : { sinif: 'havuz-limitte', text: `limitte · ${kalanSure(o.dinlenmeSonu)} kaldı (${saatKisa(o.dinlenmeSonu)})` };
   }
   if (o.aktifSlot > 0) return { sinif: 'havuz-aktif', text: `üretimde · ${o.aktifSlot}/${o.kapasite} slot` };
   if (sirada) return { sinif: 'havuz-sirada', text: 'sırada — bir sonraki iş bu hesaptan' };
