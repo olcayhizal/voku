@@ -122,9 +122,22 @@ async function portuBosalt(port) {
   }
 }
 
+// port → süren başlatma sözü. Bekçi düzinelerce işi aynı anda saldığında her
+// worker aynı hesabın köprüsünü ayrı ayrı spawn edip portu kapışıyordu
+// ("failed to listen" + 4x "köprü başlatılıyor"). Eşzamanlı çağrılar tek
+// başlatmayı bekler; başarısızlık da hepsine aynı hatayla döner.
+const baslatKilitleri = new Map();
+
 /** Bir hesabın köprü servisini o hesabın portunda başlatır, sağlıklı olana dek bekler. */
-async function servisiBaslat(platform, hesap) {
+function servisiBaslat(platform, hesap) {
   const port = portu(platform, hesap);
+  if (baslatKilitleri.has(port)) return baslatKilitleri.get(port);
+  const soz = servisiBaslatIc(platform, hesap, port).finally(() => baslatKilitleri.delete(port));
+  baslatKilitleri.set(port, soz);
+  return soz;
+}
+
+async function servisiBaslatIc(platform, hesap, port) {
   // Zaten çalışan köprü: yalnız ayakta değil, Gemini'ye bağlı da olmalı.
   if (koprular.has(port) && (await saglikli(port)) && (await modelListesi(port)).length) return;
 
