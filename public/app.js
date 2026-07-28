@@ -1292,7 +1292,9 @@ async function oturumSina(ad, hesap, dugme) {
     const o = oturumBul(ad, hesap);
     if (o) o.dogrulama = { hazir: false, mesaj: e.message, kontrol: new Date().toISOString() };
   }
-  oturumlariCiz();
+  // Sına havuz cezasını da kaldırabilir — kart "limitte" satırından hemen
+  // kurtulsun diye tam durum çekilir (oturumlariCiz onun içinde çalışır).
+  await durumuTazele();
 }
 
 async function hesapEkle(ad) {

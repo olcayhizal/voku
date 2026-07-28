@@ -122,6 +122,21 @@ export function enErkenAcilis(platformAdi, hesaplar) {
   return enErken;
 }
 
+/**
+ * Hesabın dinlenmesini elle kaldırır — başarılı "Sına" çağırır. Limit
+ * tespiti sezgisel olduğu için (geçici 500'ler kota sanılabiliyor) kullanıcıya
+ * bir serbest bırakma vanası gerekir; hesap gerçekten limitliyse ilk üretim
+ * denemesi cezayı yeniden koyar (kendini düzeltir).
+ */
+export function dinlenmeyiKaldir(platformAdi, hesapAdi) {
+  const d = hesapDurumu(platformAdi, hesapAdi);
+  const vardi = Boolean(d.dinlenmeSonu);
+  d.dinlenmeSonu = null;
+  d.sonHata = null;
+  if (vardi) diskeYaz();
+  return vardi;
+}
+
 /** O platformda şu an kiralanabilir (dinlenmede olmayan) hesap var mı? */
 export function uygunHesapVar(platformAdi, hesaplar) {
   return enErkenAcilis(platformAdi, hesaplar) === null;

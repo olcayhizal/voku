@@ -349,11 +349,20 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   if (!yanit.ok) {
     const govde = (await yanit.text()).slice(0, 400);
-    // Kota/limit ise havuz bu hesabı dinlenmeye alsın (429 ya da metin).
+    // Kota/limit ise havuz bu hesabı dinlenmeye alsın. Ama ceza süresi
+    // hatanın cinsine göre: 429/5xx çoğu zaman GEÇİCİ yavaşlatma ya da anlık
+    // sunucu hatasıdır (tarayıcıda üretim sürerken görülüyor) → 3 dk mola
+    // yeter; 1 saat yatırmak yanlış pozitifte hesabı boşuna kilitliyordu.
+    // 4xx + kota metni ise gerçek limite daha yakın → 30 dk.
     if (yanit.status === 429 || /quota|rate limit|resource.?exhausted|too many/i.test(govde)) {
-      const e = new Error(`Gemini kullanım limiti doldu (${yanit.status}).`);
+      const geciciMi = yanit.status === 429 || yanit.status >= 500 || /too many/i.test(govde);
+      const e = new Error(
+        geciciMi
+          ? `Gemini geçici olarak sınırladı (${yanit.status}) — kısa mola.`
+          : `Gemini kullanım limiti doldu (${yanit.status}).`
+      );
       e.limitDolu = true;
-      e.resetsAt = null; // köprü net reset zamanı vermiyor → varsayılan cooldown
+      e.resetsAt = Date.now() + (geciciMi ? 3 : 30) * 60 * 1000;
       throw e;
     }
     // BOŞ model listesi = köprü Gemini oturumuna hiç bağlanamadı (çerez ölmüş).

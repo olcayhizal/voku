@@ -25,7 +25,7 @@ import { adaptorAl } from './adapters/index.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
-import { havuzOzeti, uygunHesapVar } from './havuz.js';
+import { havuzOzeti, uygunHesapVar, dinlenmeyiKaldir } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
 
@@ -398,6 +398,12 @@ async function oturumDogrula(platformAdi, ayarlar, hesap) {
     if (adaptor.tarayiciGerekli === false) {
       // Tarayıcısız sürücü (Codex/köprü): tarayıcı açmadan hesap hazırlığı.
       await adaptor.hazirla(null, platform, sel, ayarlar, hesap);
+      // Sına geçtiyse havuzdaki limit cezası da kalkar: limit tespiti sezgisel,
+      // yanlış pozitifte kullanıcı tek tıkla hesabı geri açabilsin. Hesap
+      // gerçekten limitliyse ilk üretim cezayı yeniden koyar.
+      if (dinlenmeyiKaldir(platformAdi, hesap?.ad || 'varsayılan')) {
+        log.ok(`[${platformAdi}/${hesap?.ad || 'varsayılan'}] sınama geçti — limit beklemesi kaldırıldı`);
+      }
       const sonuc = {
         hazir: true,
         kontrol: new Date().toISOString(),
@@ -410,6 +416,9 @@ async function oturumDogrula(platformAdi, ayarlar, hesap) {
     ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar, { headless: ayarlar.headless });
     const page = await sayfaAl(ctx);
     await adaptor.hazirla(page, platform, sel, ayarlar, hesap);
+    if (dinlenmeyiKaldir(platformAdi, hesap?.ad || 'varsayılan')) {
+      log.ok(`[${platformAdi}/${hesap?.ad || 'varsayılan'}] sınama geçti — limit beklemesi kaldırıldı`);
+    }
     const sonuc = { hazir: true, kontrol: new Date().toISOString(), mesaj: 'Oturum açık, arayüz tanındı.' };
     durum.dogrulama.set(anahtar, sonuc);
     return sonuc;
