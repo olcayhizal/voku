@@ -60,7 +60,22 @@ function codexCalistir(argumanlar, secenekler) {
 export function limitHatasiCoz(metin) {
   const m = String(metin || '');
   if (!/usage limit|rate limit|too many requests|quota|429|limit reached/i.test(m)) return null;
-  return { limitDolu: true, resetsAt: resetZamaniCoz(m) };
+
+  // 1) Metinde reset zamanı varsa en doğrusu o (Codex genelde verir).
+  const okunan = resetZamaniCoz(m);
+  if (okunan) return { limitDolu: true, resetsAt: okunan, gecici: false };
+
+  // 2) Reset okunamadıysa hatanın cinsine göre (Gemini'dekiyle aynı mantık):
+  //    "too many requests"/429 tarzı GEÇİCİ throttle → 3 dk kısa mola;
+  //    gerçek kullanım limiti metni (usage/weekly/quota) → muhafazakâr 1 saat.
+  //    Eskiden hepsi 1 saatti — yanlış pozitifte hesap boşuna yatıyordu.
+  const geciciMi =
+    /too many requests|429/i.test(m) && !/usage limit|weekly|quota|limit reached/i.test(m);
+  return {
+    limitDolu: true,
+    resetsAt: Date.now() + (geciciMi ? 3 : 60) * 60 * 1000,
+    gecici: geciciMi,
+  };
 }
 
 /** Metinden reset zamanını (ms epoch) çıkarır; okunamazsa null. */
@@ -144,7 +159,11 @@ function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin, codex
       // söylüyor) havuzun tanıyabileceği özel hata fırlat.
       const limit = limitHatasiCoz(hata + '\n' + cikti);
       if (limit) {
-        const e = new Error(`Codex kullanım limiti doldu${limit.resetsAt ? '' : ' (reset zamanı okunamadı)'}.`);
+        const e = new Error(
+          limit.gecici
+            ? 'Codex geçici olarak sınırladı — kısa mola.'
+            : 'Codex kullanım limiti doldu.'
+        );
         e.limitDolu = true;
         e.resetsAt = limit.resetsAt;
         return reddet(e);
