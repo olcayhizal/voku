@@ -1126,7 +1126,6 @@ function hesapKarti(p, o, sirada) {
       el('button', {
         class: 'btn btn-ikincil btn-kucuk btn-sayac', text: '+',
         title: 'Bu hesaptan aynı anda yürüyen üretim sayısını artır',
-        disabled: (o.kapasite || 1) >= 8,
         onclick: (e) => hesapEszamanli(p.ad, o.hesap, (o.kapasite || 1) + 1, e.target),
       })
     ),
@@ -1333,7 +1332,7 @@ async function hesapEkle(ad) {
   }
 }
 
-/** Hesabın eşzamanlı üretim sayısını değiştirir (1-8, anında kaydedilir). */
+/** Hesabın eşzamanlı üretim sayısını değiştirir (en az 1, anında kaydedilir). */
 async function hesapEszamanli(ad, hesap, deger, dugme) {
   if (dugme) dugme.disabled = true;
   try {

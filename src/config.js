@@ -101,8 +101,8 @@ export function hesapAyarla(ayarlar, platformAdi, hesapAd, degisiklik) {
 
   if (degisiklik.concurrency !== undefined) {
     const c = Math.floor(Number(degisiklik.concurrency));
-    if (!Number.isFinite(c) || c < 1 || c > 8) {
-      throw new Error('Eşzamanlı üretim 1-8 arasında olmalı.');
+    if (!Number.isFinite(c) || c < 1) {
+      throw new Error('Eşzamanlı üretim en az 1 olmalı.');
     }
     h.concurrency = c;
   }
