@@ -1113,6 +1113,23 @@ function hesapKarti(p, o, sirada) {
     ),
     // Havuz durumu: üretimde / sırada / limitte kaç dk kaldı.
     el('div', { class: `havuz-satir ${hd.sinif}` }, hd.text),
+    // Aynı anda kaç üretim bu hesaptan yürüsün (havuz slot sayısı).
+    el('div', { class: 'hesap-eszamanli' },
+      el('span', { class: 'alt-metin', text: 'aynı anda üretim' }),
+      el('button', {
+        class: 'btn btn-ikincil btn-kucuk btn-sayac', text: '−',
+        title: 'Bu hesaptan aynı anda yürüyen üretim sayısını azalt',
+        disabled: (o.kapasite || 1) <= 1,
+        onclick: (e) => hesapEszamanli(p.ad, o.hesap, (o.kapasite || 1) - 1, e.target),
+      }),
+      el('span', { class: 'sayac-deger', text: String(o.kapasite || 1) }),
+      el('button', {
+        class: 'btn btn-ikincil btn-kucuk btn-sayac', text: '+',
+        title: 'Bu hesaptan aynı anda yürüyen üretim sayısını artır',
+        disabled: (o.kapasite || 1) >= 8,
+        onclick: (e) => hesapEszamanli(p.ad, o.hesap, (o.kapasite || 1) + 1, e.target),
+      })
+    ),
     o.dinlenmede && o.sonHata ? el('div', { class: 'oturum-satir', text: o.sonHata.slice(0, 90) }) : null,
     o.dogrulama ? el('div', { class: 'oturum-satir', text: o.dogrulama.mesaj }) : null,
     !o.dogrulama && o.sonGiris ? el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(o.sonGiris)}` }) : null,
@@ -1313,6 +1330,23 @@ async function hesapEkle(ad) {
     oturumlariCiz();
   } catch (e) {
     alert(e.message);
+  }
+}
+
+/** Hesabın eşzamanlı üretim sayısını değiştirir (1-8, anında kaydedilir). */
+async function hesapEszamanli(ad, hesap, deger, dugme) {
+  if (dugme) dugme.disabled = true;
+  try {
+    const yanit = await api(`/api/hesap/${ad}/${encodeURIComponent(hesap)}`, {
+      method: 'PATCH',
+      body: { concurrency: deger },
+    });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+    if (dugme) dugme.disabled = false;
   }
 }
 

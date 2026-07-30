@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, OUTPUT_DIR } from './paths.js';
-import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil } from './config.js';
+import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla } from './config.js';
 import { jobOlustur, waLinki, kaynakNormalize } from './job.js';
 import {
   jobOku,
@@ -601,6 +601,14 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
         const hesapAd = decodeURIComponent(parcalar[3]);
         hesapSil(ayarlar, platformAdi, hesapAd);
         log.warn(`[${platformAdi}] hesap silindi: ${hesapAd}`);
+        return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
+      }
+      // Hesap ayarı: { concurrency } — aynı anda kaç üretim.
+      if (req.method === 'PATCH' && parcalar[3]) {
+        const hesapAd = decodeURIComponent(parcalar[3]);
+        const govde = await govdeOku(req);
+        const guncel = hesapAyarla(ayarlar, platformAdi, hesapAd, { concurrency: govde.concurrency });
+        log.ok(`[${platformAdi}/${hesapAd}] eşzamanlı üretim: ${guncel.concurrency}`);
         return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
       }
     } catch (e) {

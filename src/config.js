@@ -45,6 +45,25 @@ function hamAyarYaz(ham) {
 }
 
 /**
+ * Tek-hesap ayarı ilk kez listeye dönüşürken "varsayılan" hesap, platformun
+ * mevcut oturum yollarını (düz `.env`, profil, codexHome) açıkça devralır —
+ * yoksa normalize `.profiles/<plt>-varsayılan` türetir ve eski oturum
+ * "kaybolmuş" görünür.
+ */
+function tekHesabiSomutlastir(plt) {
+  if (Array.isArray(plt.hesaplar) && plt.hesaplar.length) return;
+  const tek = { ad: 'varsayılan' };
+  if (plt.adapter === 'gemini-http') {
+    tek.port = portCikar(plt.baseUrl);
+    tek.envAdi = null; // köprü dizinindeki düz .env — mevcut çerezler korunur
+    if (plt.profileDir) tek.profileDir = plt.profileDir;
+  } else {
+    tek.codexHome = plt.codexHome || null; // null → Codex'in kendi varsayılanı
+  }
+  plt.hesaplar = [tek];
+}
+
+/**
  * Panelden hesap ekler: settings.json'a yazar VE çalışan `ayarlar` objesinin
  * o platformunun hesap listesini yeniden normalize eder (panel yeniden
  * başlamadan havuz yeni hesabı görsün).
@@ -58,17 +77,39 @@ export function hesapEkle(ayarlar, platformAdi, hesapAd) {
   const plt = ham.platforms?.[platformAdi];
   if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
 
-  // Mevcut tek-hesap ayarı liste haline gelirken ilk elemanı "varsayılan"
-  // olarak koru (eski oturum kaybolmasın).
-  if (!Array.isArray(plt.hesaplar) || !plt.hesaplar.length) {
-    plt.hesaplar = [{ ad: 'varsayılan' }];
-  }
+  tekHesabiSomutlastir(plt);
   if (plt.hesaplar.some((h) => h.ad === ad)) throw new Error(`"${ad}" hesabı zaten var.`);
   plt.hesaplar.push({ ad });
   hamAyarYaz(ham);
 
   ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
   return ayarlar.platforms[platformAdi].hesaplar.find((h) => h.ad === ad);
+}
+
+/**
+ * Panelden hesap ayarı değiştirir (şimdilik yalnız eşzamanlılık).
+ * settings.json'a yazar VE çalışan ayarı yeniden normalize eder — süren
+ * platform kuyruğu eski değeriyle biter, yeni işler yeni değeri kullanır.
+ */
+export function hesapAyarla(ayarlar, platformAdi, hesapAd, degisiklik) {
+  const ham = hamAyarOku();
+  const plt = ham.platforms?.[platformAdi];
+  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  tekHesabiSomutlastir(plt);
+  const h = plt.hesaplar.find((x) => x.ad === hesapAd);
+  if (!h) throw new Error(`"${hesapAd}" hesabı yok.`);
+
+  if (degisiklik.concurrency !== undefined) {
+    const c = Math.floor(Number(degisiklik.concurrency));
+    if (!Number.isFinite(c) || c < 1 || c > 8) {
+      throw new Error('Eşzamanlı üretim 1-8 arasında olmalı.');
+    }
+    h.concurrency = c;
+  }
+
+  hamAyarYaz(ham);
+  ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
+  return ayarlar.platforms[platformAdi].hesaplar.find((x) => x.ad === hesapAd);
 }
 
 /** Panelden hesap siler (en az bir hesap kalmalı). */
@@ -120,18 +161,27 @@ function hesaplariNormalize(plt) {
       const port = Number(h.port) || sonrakiPort;
       sonrakiPort = port + 1;
       // Her Gemini hesabı ayrı Google oturumu → ayrı tarayıcı profili.
+      // envAdi açıkça null yazılmışsa köprü dizinindeki düz `.env` demektir
+      // (somutlaştırılmış eski tek-hesap) — ad'a düşürülmez.
       return {
         ad,
         concurrency: con,
         port,
-        envAdi: h.envAdi || ad,
+        envAdi: h.envAdi === undefined ? ad : h.envAdi,
         profileDir: mutlak(h.profileDir || path.join('.profiles', `gemini-${ad}`)),
       };
     }
+    // codexHome açıkça null ise Codex'in kendi varsayılan dizini kullanılır
+    // (somutlaştırılmış eski tek-hesap); tanımsızsa hesaba özel profil türetilir.
     return {
       ad,
       concurrency: con,
-      codexHome: mutlak(h.codexHome || path.join('.profiles', `chatgpt-${ad}`, '.codex')),
+      codexHome:
+        h.codexHome === undefined
+          ? mutlak(path.join('.profiles', `chatgpt-${ad}`, '.codex'))
+          : h.codexHome
+            ? mutlak(h.codexHome)
+            : null,
     };
   });
 }

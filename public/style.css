@@ -317,6 +317,28 @@ h3 {
 .havuz-limitte { color: var(--safelight); background: color-mix(in srgb, var(--safelight) 12%, transparent); }
 .hesap-kart.sirada { border-left-color: var(--safelight); }
 
+/* Hesap başına eşzamanlı üretim sayacı: aynı anda üretim [−] N [+] */
+.hesap-eszamanli {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  font-size: 11px;
+}
+.btn-sayac {
+  padding: 1px 8px;
+  min-width: 24px;
+  font-family: var(--mono);
+  line-height: 1.5;
+}
+.sayac-deger {
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 14px;
+  text-align: center;
+  color: var(--paper);
+}
+
 /* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
 .lamba-link {
   margin-left: 5px;
