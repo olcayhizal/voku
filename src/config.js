@@ -16,9 +16,10 @@ const VARSAYILAN = {
   fal: { apiKey: null, concurrency: 4 },
 };
 
-// Platform başına varsayılan fal modeli — web motoruyla aynı modelin API hali.
+// Platform başına varsayılan fal modeli. Gemini'de Nano Banana 2
+// (gemini-3.1-flash, $0.08/kare) tercih edildi — Pro ($0.15) yerine.
 const FAL_MODELLERI = {
-  'gemini-http': 'fal-ai/nano-banana-pro/edit',
+  'gemini-http': 'fal-ai/nano-banana-2/edit',
   'chatgpt-codex': 'openai/gpt-image-2/edit',
 };
 

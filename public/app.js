@@ -1232,7 +1232,7 @@ function falKarti(p) {
     el('p', {
       class: 'alt-metin',
       text: p.ad === 'gemini'
-        ? 'Görsel başına ~$0.15 (nano-banana-pro). Web oturumu ücretsizdir; fal yalnız yedek amaçlıdır.'
+        ? 'Görsel başına ~$0.08 (nano-banana-2). Web oturumu ücretsizdir; fal yalnız yedek amaçlıdır.'
         : 'Görsel başına ücret kaliteye göre değişir (gpt-image-2). Web oturumu ücretsizdir; fal yalnız yedek amaçlıdır.',
     }),
     falAnahtarBolumu()
