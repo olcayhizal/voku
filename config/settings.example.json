@@ -45,5 +45,9 @@
       "resultImage": "generated-image img, img.image-item, model-response img[src^=\"blob:\"], model-response img[src^=\"https\"]"
     }
   },
-  "_": "Bu sablondan config/settings.json olusturulur (install/ilk acilista kopyalanir). Hesaplari panelden Oturumlar > + Hesap ekle ile eklersin; gercek settings.json git-disidir."
+  "_": "Bu sablondan config/settings.json olusturulur (install/ilk acilista kopyalanir). Hesaplari panelden Oturumlar > + Hesap ekle ile eklersin; gercek settings.json git-disidir.",
+  "fal": {
+    "apiKey": null,
+    "concurrency": 4
+  }
 }

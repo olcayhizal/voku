@@ -670,13 +670,33 @@ function jobDetayCiz() {
                 })
               )
             : t.status === 'failed' || t.status === 'done'
-              ? el('button', {
-                  class: 'kare-tekrar',
-                  text: 'yenile',
-                  disabled: job.kosuyor,
-                  onclick: () => jobTekrar(job.id, { taskId: t.id }),
-                })
-              : null
+              ? el('span', { class: 'kare-eylemler' },
+                  el('button', {
+                    class: 'kare-tekrar',
+                    text: 'yenile',
+                    disabled: job.kosuyor,
+                    onclick: () => jobTekrar(job.id, { taskId: t.id }),
+                  }),
+                  // Web oturumları üretemediyse kestirme: bu kareyi fal'a ver.
+                  t.status === 'failed' && state.fal?.anahtarVar
+                    ? el('button', {
+                        class: 'kare-tekrar kare-fal',
+                        text: 'fal ile dene',
+                        title: 'Bu kareyi fal API ile üret (bakiyeden ücret düşer)',
+                        disabled: job.kosuyor,
+                        onclick: () => falIleDene(job.id, t.id),
+                      })
+                    : null
+                )
+              : t.limitBekliyor && state.fal?.anahtarVar
+                ? el('button', {
+                    class: 'kare-tekrar kare-fal',
+                    text: 'fal ile dene',
+                    title: 'Limit açılmasını beklemeden bu kareyi fal API ile üret (ücretli)',
+                    disabled: job.kosuyor,
+                    onclick: () => falIleDene(job.id, t.id),
+                  })
+                : null
       ),
       el('div', { class: 'kare-prompt', title: t.prompt },
         el('span', { class: 'pid', text: t.promptId }),
@@ -1089,6 +1109,9 @@ function kalanSure(ms) {
  * sırada beklediği, limittekinin ne kadarı kaldığı.
  */
 function havuzRozeti(o, sirada) {
+  if (o.aktif === false) {
+    return { sinif: 'havuz-pasif', text: 'pasif — havuz bu hesabı kullanmıyor' };
+  }
   if (o.dinlenmede) {
     // İki farklı bekleme var ve karışmamalı: gerçek kota limiti vs oturum
     // sorunu (çerez ölmüş / hazırlık başarısız). İkincisi "limitte" diye
@@ -1106,7 +1129,8 @@ function havuzRozeti(o, sirada) {
 /** Tek bir hesabın oturum satırı (giriş + havuz durumu + eylemler). */
 function hesapKarti(p, o, sirada) {
   const hd = havuzRozeti(o, sirada);
-  return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}${sirada ? ' sirada' : ''}` },
+  const pasif = o.aktif === false;
+  return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}${sirada ? ' sirada' : ''}${pasif ? ' pasif' : ''}` },
     el('div', { class: 'hesap-ust' },
       el('span', { class: 'hesap-ad' }, el('span', { class: 'hesap-nokta' }), o.hesap),
       el('span', { class: 'oturum-rozet', text: oturumRozeti(o) })
@@ -1139,6 +1163,15 @@ function hesapKarti(p, o, sirada) {
           ? el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Girişi tamamladım', onclick: () => loginBitir(p.ad, o.hesap) })
           : el('button', { class: 'btn btn-ikincil btn-kucuk', text: o.profilVar ? 'Yeniden giriş' : 'Giriş yap', onclick: () => loginBaslat(p.ad, o.hesap) }),
       el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Sına', disabled: o.pencereAcik || o.girisSuruyor, onclick: (e) => oturumSina(p.ad, o.hesap, e.target) }),
+      // Havuzdan geçici çıkarma — oturum dosyaları silinmez, geri açılabilir.
+      el('button', {
+        class: `btn btn-ikincil btn-kucuk${pasif ? '' : ' btn-tehlike'}`,
+        text: pasif ? 'Aktifleştir' : 'Pasifleştir',
+        title: pasif
+          ? 'Hesabı havuza geri kat — üretimlerde yeniden kullanılır'
+          : 'Hesabı havuzdan çıkar — oturum silinmez, üretimlerde kullanılmaz',
+        onclick: () => hesapAktiflik(p.ad, o.hesap, pasif),
+      }),
       // Son hesap silinemez.
       p.cokluHesap
         ? el('button', { class: 'btn btn-ikincil btn-kucuk btn-tehlike', text: 'Sil', onclick: () => hesapSil(p.ad, o.hesap) })
@@ -1149,6 +1182,147 @@ function hesapKarti(p, o, sirada) {
       ? el('p', { class: 'alt-metin', text: 'Tarayıcı penceresi açıldı. Girişi orada tamamla, sonra "Girişi tamamladım"a bas.' })
       : null
   );
+}
+
+/** fal oturum kartındaki durum satırı. */
+function falDurumSatiri(p) {
+  const f = p.fal || {};
+  if (!f.anahtarVar) return { sinif: 'havuz-pasif', text: 'API anahtarı girilmedi' };
+  if (f.mod === 'pasif') return { sinif: 'havuz-pasif', text: 'kapalı — hiç kullanılmaz' };
+  const d = f.durum;
+  if (d?.dinlenmede) {
+    return { sinif: 'havuz-limitte', text: `${d.sonHata || 'sorun'} · ${kalanSure(d.dinlenmeSonu)} kaldı` };
+  }
+  if (d?.aktifSlot > 0) return { sinif: 'havuz-aktif', text: `üretimde · ${d.aktifSlot}/${d.kapasite} slot` };
+  return f.mod === 'aktif'
+    ? { sinif: 'havuz-hazir', text: 'hazır — havuzda normal hesap gibi (failover sırasının sonunda)' }
+    : { sinif: 'havuz-hazir', text: 'beklemede — diğer oturumlar düşerse devreye girer' };
+}
+
+/**
+ * Platform kartındaki fal oturumu: mod seçimi (aktif/gerekirse/kapalı),
+ * model etiketi, anahtar girişi. Anahtar tüm platformlar için ortaktır.
+ */
+function falKarti(p) {
+  const f = p.fal || {};
+  const fd = falDurumSatiri(p);
+  const modlar = [
+    { deger: 'aktif', etiket: 'Aktif', ipucu: 'Havuzun parçası — web hesaplarıyla birlikte kullanılır (ücretli!)' },
+    { deger: 'yedek', etiket: 'Gerekirse', ipucu: 'Yalnız tüm web oturumları düştüğünde/limitteyken devreye girer' },
+    { deger: 'pasif', etiket: 'Kapalı', ipucu: 'Bu platformda fal hiç kullanılmaz' },
+  ];
+  return el('div', { class: `hesap-kart fal-kart${f.mod === 'pasif' || !f.anahtarVar ? ' pasif' : ''}` },
+    el('div', { class: 'hesap-ust' },
+      el('span', { class: 'hesap-ad' }, el('span', { class: 'hesap-nokta' }), 'fal.ai — API yedeği'),
+      el('span', { class: 'oturum-rozet', text: f.model || 'model tanımsız' })
+    ),
+    el('div', { class: `havuz-satir ${fd.sinif}` }, fd.text),
+    el('div', { class: 'fal-mod' },
+      el('span', { class: 'alt-metin', text: 'kullanım' }),
+      ...modlar.map((m) =>
+        el('button', {
+          class: `btn btn-kucuk fal-mod-btn${f.mod === m.deger ? ' secili' : ' btn-ikincil'}`,
+          text: m.etiket,
+          title: m.ipucu,
+          disabled: !f.anahtarVar && m.deger !== 'pasif',
+          onclick: () => falModDegistir(p.ad, m.deger),
+        })
+      )
+    ),
+    el('p', {
+      class: 'alt-metin',
+      text: p.ad === 'gemini'
+        ? 'Görsel başına ~$0.15 (nano-banana-pro). Web oturumu ücretsizdir; fal yalnız yedek amaçlıdır.'
+        : 'Görsel başına ücret kaliteye göre değişir (gpt-image-2). Web oturumu ücretsizdir; fal yalnız yedek amaçlıdır.',
+    }),
+    falAnahtarBolumu()
+  );
+}
+
+/** Anahtar girişi / değiştirme — tüm platformların ortak fal anahtarı. */
+function falAnahtarBolumu() {
+  if (state.fal?.anahtarVar && !state.falAnahtarDuzenle) {
+    return el('div', { class: 'fal-anahtar' },
+      el('span', { class: 'alt-metin', text: `anahtar kayıtlı · bakiye ${state.fal.bakiye !== null ? `$${state.fal.bakiye.toFixed(2)}` : 'okunamadı'}` }),
+      el('button', {
+        class: 'btn btn-ikincil btn-kucuk',
+        text: 'Değiştir',
+        onclick: () => { state.falAnahtarDuzenle = true; oturumlariCiz(); },
+      })
+    );
+  }
+  return el('div', { class: 'fal-anahtar' },
+    el('input', {
+      class: 'girdi girdi-kucuk',
+      id: 'falAnahtarGirdi',
+      type: 'password',
+      placeholder: 'fal API anahtarı (id:secret)',
+      autocomplete: 'off',
+    }),
+    el('button', {
+      class: 'btn btn-birincil btn-kucuk',
+      text: 'Kaydet',
+      onclick: (e) => falAnahtarGonder(e.target),
+    }),
+    state.falAnahtarDuzenle
+      ? el('button', {
+          class: 'btn btn-ikincil btn-kucuk',
+          text: 'Vazgeç',
+          onclick: () => { state.falAnahtarDuzenle = false; oturumlariCiz(); },
+        })
+      : null
+  );
+}
+
+async function falAnahtarGonder(dugme) {
+  const girdi = document.getElementById('falAnahtarGirdi');
+  const deger = (girdi?.value || '').trim();
+  if (!deger) return alert('Anahtar boş — fal.ai/dashboard/keys sayfasından alınır.');
+  dugme.disabled = true;
+  try {
+    await api('/api/fal/anahtar', { method: 'POST', body: { apiKey: deger } });
+    state.falAnahtarDuzenle = false;
+    await durumuTazele();
+  } catch (e) {
+    alert(e.message);
+    dugme.disabled = false;
+  }
+}
+
+async function falModDegistir(ad, mod) {
+  try {
+    const yanit = await api(`/api/fal/${ad}`, { method: 'PATCH', body: { mod } });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    if (yanit.fal) state.fal = yanit.fal;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+/** Hesabı havuzdan çıkar / geri kat (oturum dosyalarına dokunmaz). */
+async function hesapAktiflik(ad, hesap, aktifYap) {
+  try {
+    const yanit = await api(`/api/hesap/${ad}/${encodeURIComponent(hesap)}`, {
+      method: 'PATCH',
+      body: { aktif: aktifYap },
+    });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+/** Başarısız/bekleyen kareyi doğrudan fal API ile üret. */
+async function falIleDene(jobId, taskId) {
+  try {
+    await api(`/api/jobs/${jobId}/fal`, { method: 'POST', body: { taskId } });
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 function oturumlariCiz() {
@@ -1162,7 +1336,7 @@ function oturumlariCiz() {
     const calisanVar = oturumlar.some((o) => o.aktifSlot > 0);
     const siradakiAd = calisanVar
       ? null
-      : oturumlar.find((o) => !o.dinlenmede && (o.aktifSlot || 0) < (o.kapasite || 1))?.hesap;
+      : oturumlar.find((o) => o.aktif !== false && !o.dinlenmede && (o.aktifSlot || 0) < (o.kapasite || 1))?.hesap;
     const kart = el('div', { class: 'oturum-kart' },
       el('div', { class: 'oturum-ust' },
         el('h3', { text: PLATFORM_ETIKET[p.ad] || p.ad }),
@@ -1171,7 +1345,18 @@ function oturumlariCiz() {
           text: p.girisTipi === 'surec' ? `${p.adapter} · codex` : (p.adapter || p.ad),
         })
       ),
-      el('div', { class: 'hesap-listesi' }, ...oturumlar.map((o) => hesapKarti(p, o, o.hesap === siradakiAd))),
+      // Web hesaplarının hepsi devre dışıyken üretim tümüyle fal'a düşer —
+      // kullanıcı maliyeti fark etmeden kuyruk yakmasın.
+      p.fal?.uyari
+        ? el('div', {
+            class: 'fal-uyari',
+            text: '⚠ Yalnız fal oturumu kullanılabilir durumda — bu platformdaki TÜM görseller fal API ile üretilecek, bakiyeden ücret düşer.',
+          })
+        : null,
+      el('div', { class: 'hesap-listesi' },
+        ...oturumlar.map((o) => hesapKarti(p, o, o.hesap === siradakiAd)),
+        falKarti(p)
+      ),
       el('button', {
         class: 'btn btn-ekle btn-kucuk',
         text: '+ Hesap ekle',
@@ -1234,6 +1419,18 @@ function oturumlariCiz() {
     },
       el('i'),
       'Telegram'
+    ),
+    // fal bakiyesi: yedek üretim kasası — $5'in altı kırmızı yanar.
+    el('span', {
+      class: `oturum-lamba lamba-fal ${state.fal?.anahtarVar ? (state.fal.dusuk ? 'kritik' : 'acik') : ''}`,
+      title: state.fal?.anahtarVar
+        ? state.fal.bakiye !== null
+          ? `fal.ai bakiyesi: $${state.fal.bakiye.toFixed(2)}${state.fal.dusuk ? ' — DÜŞÜK! Bakiye yükleyin.' : ''}`
+          : `fal anahtarı kayıtlı — bakiye okunamadı${state.fal.bakiyeHatasi ? `: ${state.fal.bakiyeHatasi}` : ''}`
+        : 'fal.ai bağlı değil — Oturumlar sekmesinden API anahtarı girilir',
+    },
+      el('i'),
+      state.fal?.anahtarVar && state.fal.bakiye !== null ? `fal $${state.fal.bakiye.toFixed(2)}` : 'fal'
     ),
     // Dış erişim: panel internete açık mı, açıksa bağlantıyı tek tıkla aç.
     el('span', {
@@ -1689,6 +1886,11 @@ function akisiBagla() {
       oturumlariCiz(); // bar lambası + oturum kartı buradan besleniyor
       return;
     }
+    if (tip === 'fal') {
+      state.fal = veri;
+      oturumlariCiz(); // header rozeti + fal oturum kartı
+      return;
+    }
     if (tip === 'kosu') {
       const job = state.joblar.find((j) => j.id === veri.id);
       if (job) job.kosuyor = veri.kosuyor;
@@ -1733,6 +1935,7 @@ async function durumuTazele() {
   state.platformlar = durum.platformlar;
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;
+  state.fal = durum.fal || null;
   state.joblar = durum.joblar;
   // Seçili iş silinmişse ilk işe düş; duruyorsa seçim korunur.
   if (state.seciliJob && !durum.joblar.some((j) => j.id === state.seciliJob)) {

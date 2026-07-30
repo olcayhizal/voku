@@ -12,13 +12,24 @@ const VARSAYILAN = {
   parallelPlatforms: true,
   platforms: {},
   selectors: {},
+  // fal.ai yedek üretim: anahtar panelden girilir, settings.json'da saklanır.
+  fal: { apiKey: null, concurrency: 4 },
 };
+
+// Platform başına varsayılan fal modeli — web motoruyla aynı modelin API hali.
+const FAL_MODELLERI = {
+  'gemini-http': 'fal-ai/nano-banana-pro/edit',
+  'chatgpt-codex': 'openai/gpt-image-2/edit',
+};
+
+const FAL_MODLARI = ['aktif', 'yedek', 'pasif'];
 
 export function ayarlariYukle(dosya) {
   const p = dosya ? path.resolve(dosya) : path.join(CONFIG_DIR, 'settings.json');
   if (!fs.existsSync(p)) throw new Error(`Ayar dosyası yok: ${p}`);
   const ham = JSON.parse(fs.readFileSync(p, 'utf8'));
   const s = { ...VARSAYILAN, ...ham };
+  s.fal = { ...VARSAYILAN.fal, ...(ham.fal || {}) };
   // Profil yolları köke göre mutlaklaştırılır. Tarayıcısız sürücülerde
   // (Codex) profileDir olmayabilir — o platformda tarayıcı hiç açılmaz.
   for (const [ad, plt] of Object.entries(s.platforms)) {
@@ -29,6 +40,8 @@ export function ayarlariYukle(dosya) {
         : path.join(ROOT, plt.profileDir);
     }
     plt.hesaplar = hesaplariNormalize(plt);
+    plt.falModel = plt.falModel || FAL_MODELLERI[plt.adapter] || null;
+    plt.falMod = FAL_MODLARI.includes(plt.falMod) ? plt.falMod : 'yedek';
   }
   return s;
 }
@@ -106,6 +119,9 @@ export function hesapAyarla(ayarlar, platformAdi, hesapAd, degisiklik) {
     }
     h.concurrency = c;
   }
+  if (degisiklik.aktif !== undefined) {
+    h.aktif = Boolean(degisiklik.aktif);
+  }
 
   hamAyarYaz(ham);
   ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
@@ -126,6 +142,33 @@ export function hesapSil(ayarlar, platformAdi, hesapAd) {
   ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
 }
 
+/** fal API anahtarını kaydeder (settings.json + çalışan ayar). */
+export function falAnahtarKaydet(ayarlar, apiKey) {
+  const anahtar = String(apiKey || '').trim();
+  if (!/^[\w-]+:[\w-]+$/.test(anahtar)) {
+    throw new Error('Geçersiz fal anahtarı — "id:secret" biçiminde olmalı.');
+  }
+  const ham = hamAyarOku();
+  ham.fal = { ...(ham.fal || {}), apiKey: anahtar };
+  hamAyarYaz(ham);
+  ayarlar.fal = { ...VARSAYILAN.fal, ...ham.fal };
+  return ayarlar.fal;
+}
+
+/** Platformun fal modunu değiştirir: aktif | yedek | pasif. */
+export function falModKaydet(ayarlar, platformAdi, mod) {
+  if (!FAL_MODLARI.includes(mod)) {
+    throw new Error(`Geçersiz fal modu: ${mod} (aktif/yedek/pasif olmalı).`);
+  }
+  const ham = hamAyarOku();
+  const plt = ham.platforms?.[platformAdi];
+  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  plt.falMod = mod;
+  hamAyarYaz(ham);
+  ayarlar.platforms[platformAdi].falMod = mod;
+  return mod;
+}
+
 /**
  * Bir platformun hesap listesini üretir. `hesaplar` tanımlıysa çoklu havuz;
  * yoksa mevcut tek-hesap ayarları tek elemanlı listeye sarılır (geriye uyum —
@@ -142,7 +185,7 @@ function hesaplariNormalize(plt) {
 
   if (!cocuk) {
     // Tek hesap — mevcut alanlardan türetilir.
-    const tek = { ad: 'varsayılan', concurrency: varsayilanCon };
+    const tek = { ad: 'varsayılan', concurrency: varsayilanCon, aktif: true };
     if (plt.adapter === 'gemini-http') {
       tek.port = portCikar(plt.baseUrl);
       tek.envAdi = null; // köprü dizinindeki düz `.env`
@@ -157,6 +200,7 @@ function hesaplariNormalize(plt) {
   return cocuk.map((h, i) => {
     const ad = String(h.ad || `hesap-${i + 1}`);
     const con = Number(h.concurrency) > 0 ? Number(h.concurrency) : varsayilanCon;
+    const aktif = h.aktif !== false;
     if (plt.adapter === 'gemini-http') {
       const port = Number(h.port) || sonrakiPort;
       sonrakiPort = port + 1;
@@ -166,6 +210,7 @@ function hesaplariNormalize(plt) {
       return {
         ad,
         concurrency: con,
+        aktif,
         port,
         envAdi: h.envAdi === undefined ? ad : h.envAdi,
         profileDir: mutlak(h.profileDir || path.join('.profiles', `gemini-${ad}`)),
@@ -176,6 +221,7 @@ function hesaplariNormalize(plt) {
     return {
       ad,
       concurrency: con,
+      aktif,
       codexHome:
         h.codexHome === undefined
           ? mutlak(path.join('.profiles', `chatgpt-${ad}`, '.codex'))

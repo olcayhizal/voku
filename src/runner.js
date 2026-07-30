@@ -1,5 +1,6 @@
 import { contextAc, sayfaAl, bekle } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
+import * as falAdaptoru from './adapters/fal.js';
 import { jobYaz, manifestYaz, durumuHesapla } from './store.js';
 import { varyantDizini, taskVaryantlariniUret } from './varyant.js';
 import * as havuz from './havuz.js';
@@ -45,23 +46,33 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       const kalan = erken - Date.now();
       if (kalan > HESAP_BEKLEME_ESIGI) {
         task.status = 'pending';
-        task.error = `Tüm ${platformAdi} hesapları limitte — ${saatEtiketi(erken)}'de otomatik sürecek.`;
-        // Bekçi (server) bu işareti görüp reset olunca işi kendiliğinden başlatır.
+        // Infinity: hiçbir hesap kendiliğinden açılmayacak (hepsi pasif) —
+        // bekçi yine izler, kullanıcı bir hesabı aktifleştirince sürer.
+        task.error = Number.isFinite(erken)
+          ? `Tüm ${platformAdi} hesapları limitte — ${saatEtiketi(erken)}'de otomatik sürecek.`
+          : `Tüm ${platformAdi} hesapları pasif — bir hesabı aktifleştirin veya fal'ı açın.`;
         task.limitBekliyor = true;
-        task.limitAcilis = erken;
+        task.limitAcilis = Number.isFinite(erken) ? erken : null;
         jobYaz(job);
         manifestYaz(job);
-        log.warn(`[${platformAdi}] ${task.id} bekletildi — hesaplar ${saatEtiketi(erken)}'e kadar limitte`);
+        log.warn(
+          Number.isFinite(erken)
+            ? `[${platformAdi}] ${task.id} bekletildi — hesaplar ${saatEtiketi(erken)}'e kadar limitte`
+            : `[${platformAdi}] ${task.id} bekletildi — kullanılabilir hesap yok (hepsi pasif)`
+        );
         return 'pending';
       }
       await bekle(Math.min(kalan + 1000, 30000), signal);
       continue;
     }
 
+    // Sanal fal hesabı platform sürücüsüyle değil fal API'siyle üretir.
+    const etkinAdaptor = hesap.saglayici === 'fal' ? falAdaptoru : adaptor;
+
     // 2) Hesap ilk kez kullanılıyorsa hazırla (Codex girişi / köprü servisi).
     if (!hazirlanan.has(hesap.ad)) {
       try {
-        await adaptor.hazirla(null, platform, sel, ayarlar, hesap);
+        await etkinAdaptor.hazirla(null, platform, sel, ayarlar, hesap);
         hazirlanan.add(hesap.ad);
         log.ok(`[${platformAdi}] hesap hazır: ${hesap.ad}`);
       } catch (e) {
@@ -87,7 +98,7 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
 
     try {
       log.info(`[${platformAdi}:${hesap.ad}] ${task.id} → üretim (deneme ${task.attempts}/${ayarlar.maxAttempts})`);
-      const dosyalar = await adaptor.uret(null, {
+      const dosyalar = await etkinAdaptor.uret(null, {
         imagePath: job.inputImage,
         prompt: task.prompt,
         outDir: varyantDizini(job, 'uretim'),
@@ -160,14 +171,34 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
  * failover ile taze hesaba kayar.
  */
 async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler) {
-  const hesaplar = platform.hesaplar || [];
+  // Havuz = aktif web hesapları + (mod izin veriyorsa) sanal fal hesabı.
+  // Pasif hesaplar listede kalır ama kirala/enErkenAcilis onları atlar.
+  const webHesaplar = platform.hesaplar || [];
+  const falHesap = falAdaptoru.sanalHesap(ayarlar, platform);
+  const hesaplar = falHesap ? [...webHesaplar, falHesap] : webHesaplar;
   const kuyruk = tasklar.filter((t) => t.status !== 'done');
-  const toplamSlot = hesaplar.reduce((n, h) => n + Math.max(1, Number(h.concurrency) || 1), 0);
+
+  if (!hesaplar.some((h) => h.aktif !== false)) {
+    for (const t of kuyruk) {
+      t.status = 'pending';
+      t.error = `Tüm ${platformAdi} hesapları pasif — bir hesabı aktifleştirin veya fal'ı açın.`;
+      t.limitBekliyor = true;
+      t.limitAcilis = null;
+    }
+    jobYaz(job);
+    manifestYaz(job);
+    log.warn(`[${platformAdi}] ${kuyruk.length} task bekletildi — kullanılabilir hesap yok`);
+    return;
+  }
+
+  const toplamSlot = hesaplar
+    .filter((h) => h.aktif !== false)
+    .reduce((n, h) => n + Math.max(1, Number(h.concurrency) || 1), 0);
   const isciSayisi = Math.max(1, Math.min(toplamSlot, kuyruk.length));
   const hazirlanan = new Set();
 
   log.info(
-    `[${platformAdi}] ${adaptor.ad} — ${kuyruk.length} task, ${hesaplar.length} hesap, ${isciSayisi} paralel slot`
+    `[${platformAdi}] ${adaptor.ad} — ${kuyruk.length} task, ${hesaplar.length} hesap${falHesap ? ' (fal dahil)' : ''}, ${isciSayisi} paralel slot`
   );
 
   let sonraki = 0;
@@ -309,6 +340,42 @@ async function platformKuyrugu(job, platformAdi, tasklar, ayarlar, secenekler) {
     }
     jobYaz(job);
   }
+}
+
+/**
+ * Tek bir task'ı doğrudan fal ile üretir ("fal ile dene" butonu). Mod
+ * pasif olsa bile çalışır — buton bilinçli kullanıcı kararıdır; tek şart
+ * anahtarın tanımlı olması.
+ */
+export async function taskiFalIleCalistir(job, taskId, ayarlar, secenekler = {}) {
+  if (!ayarlar.fal?.apiKey) throw new Error('fal API anahtarı tanımlı değil.');
+  const task = job.tasks.find((t) => t.id === taskId);
+  if (!task) throw new Error(`Task yok: ${taskId}`);
+  const platform = ayarlar.platforms[task.platform];
+  if (!platform?.falModel) throw new Error(`${task.platform} için fal modeli tanımlı değil.`);
+
+  task.status = 'pending';
+  task.attempts = 0;
+  task.error = null;
+  task.limitBekliyor = false;
+  task.limitAcilis = null;
+  jobYaz(job);
+
+  const hesap = {
+    ad: 'fal',
+    saglayici: 'fal',
+    yedek: false,
+    aktif: true,
+    concurrency: Math.max(1, Number(ayarlar.fal.concurrency) || 4),
+  };
+  await taskiIsleHavuz(
+    job, task, falAdaptoru, task.platform, platform, [hesap],
+    ayarlar.selectors[task.platform] || {}, ayarlar, secenekler.signal, new Set()
+  );
+  job.status = durumuHesapla(job);
+  jobYaz(job);
+  manifestYaz(job);
+  return job;
 }
 
 /** Bir job'ın bekleyen tüm task'larını işler. */

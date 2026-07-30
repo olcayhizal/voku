@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, OUTPUT_DIR } from './paths.js';
-import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla } from './config.js';
+import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla, falAnahtarKaydet, falModKaydet } from './config.js';
 import { jobOlustur, waLinki, kaynakNormalize } from './job.js';
 import {
   jobOku,
@@ -17,11 +17,12 @@ import {
   baskiKaydi,
   olaylar,
 } from './store.js';
-import { jobuCalistir } from './runner.js';
+import { jobuCalistir, taskiFalIleCalistir } from './runner.js';
 import { varyantSayilari, taskVaryantDurumu, onizlemeYolu } from './varyant.js';
 import { odaOzeti, sayfaBul, sayfayiBas, basimiGeriAl, etdxUret } from './sayfa.js';
 import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
+import * as falAdaptoru from './adapters/fal.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
@@ -172,6 +173,22 @@ function oturumDurumu(platform, hesap) {
   };
 }
 
+// platformDurumu/falOzeti panel dışında da (SSE callback'leri) çağrılıyor;
+// çalışan ayar nesnesine modül düzeyinde erişim gerekiyor.
+let sunucuAyarlar = null;
+
+/** Header rozeti için fal özeti: anahtar + bakiye. */
+function falOzeti() {
+  const b = falAdaptoru.sonBakiye();
+  return {
+    anahtarVar: Boolean(sunucuAyarlar?.fal?.apiKey),
+    bakiye: b.deger,
+    bakiyeZamani: b.zaman,
+    bakiyeHatasi: b.hata,
+    dusuk: b.deger !== null && b.deger < 5,
+  };
+}
+
 /** Bir platformun tüm hesaplarının oturum + havuz durumunu birleştirir. */
 function platformDurumu(platform) {
   const adaptor = adaptorAl(platform.adapter || platform.ad);
@@ -181,6 +198,21 @@ function platformDurumu(platform) {
     const hv = havuz.find((x) => x.ad === h.ad) || {};
     return { ...o, ...hv };
   });
+
+  // fal oturumu: mod + (havuza katılıyorsa) sanal hesabın anlık durumu.
+  const falSanal = sunucuAyarlar ? falAdaptoru.sanalHesap(sunucuAyarlar, platform) : null;
+  const falDurum = falSanal ? havuzOzeti(platform.ad, [falSanal])[0] : null;
+  // Uyarı: web hesaplarının hiçbiri şu an kullanılamıyor (pasif/limitte) ve
+  // fal devrede — bu platformdaki her üretim ücretli fal API'sine gider.
+  const webUygun = havuz.some((h) => h.aktif && !h.dinlenmede);
+  const fal = {
+    mod: platform.falMod || 'yedek',
+    model: platform.falModel || null,
+    anahtarVar: Boolean(sunucuAyarlar?.fal?.apiKey),
+    durum: falDurum,
+    uyari: Boolean(falSanal) && !webUygun,
+  };
+
   return {
     // Bar lambası tek-oturum alanlarını (pencereAcik/dogrulama/profilVar)
     // ilk hesaptan okur — önce yayılır, sonra platform alanları ezer.
@@ -193,6 +225,7 @@ function platformDurumu(platform) {
     cokluHesap: (platform.hesaplar || []).length > 1,
     oturumlar,
     hesaplar: havuz,
+    fal,
   };
 }
 
@@ -201,6 +234,7 @@ function durumPaketi(ayarlar) {
     platformlar: Object.values(ayarlar.platforms).map(platformDurumu),
     joblar: jobListele().map(jobOzet).reverse(),
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
+    fal: falOzeti(),
     promptDosyasi: path.relative(ROOT, promptDosyaYolu()),
     ayarlar: {
       maxAttempts: ayarlar.maxAttempts,
@@ -603,18 +637,50 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
         log.warn(`[${platformAdi}] hesap silindi: ${hesapAd}`);
         return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
       }
-      // Hesap ayarı: { concurrency } — aynı anda kaç üretim.
+      // Hesap ayarı: { concurrency?, aktif? }.
       if (req.method === 'PATCH' && parcalar[3]) {
         const hesapAd = decodeURIComponent(parcalar[3]);
         const govde = await govdeOku(req);
-        const guncel = hesapAyarla(ayarlar, platformAdi, hesapAd, { concurrency: govde.concurrency });
-        log.ok(`[${platformAdi}/${hesapAd}] eşzamanlı üretim: ${guncel.concurrency}`);
+        const guncel = hesapAyarla(ayarlar, platformAdi, hesapAd, {
+          concurrency: govde.concurrency,
+          aktif: govde.aktif,
+        });
+        log.ok(`[${platformAdi}/${hesapAd}] güncellendi — eşzamanlı: ${guncel.concurrency ?? '-'}, ${guncel.aktif === false ? 'pasif' : 'aktif'}`);
         return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
       }
     } catch (e) {
       return json(res, 400, { hata: String(e?.message || e) });
     }
     return json(res, 404, { hata: 'Bilinmeyen hesap eylemi' });
+  }
+
+  // --- fal.ai yedek üretim ---
+  if (parcalar[1] === 'fal') {
+    try {
+      // Anahtar kaydet + bakiye ile doğrula.
+      if (parcalar[2] === 'anahtar' && req.method === 'POST') {
+        const govde = await govdeOku(req);
+        falAnahtarKaydet(ayarlar, govde.apiKey);
+        const b = await falAdaptoru.bakiyeTazele(ayarlar, true);
+        if (b.deger === null) {
+          return json(res, 400, { hata: `Anahtar kaydedildi ama doğrulanamadı: ${b.hata || 'bakiye okunamadı'}` });
+        }
+        log.ok(`fal anahtarı kaydedildi — bakiye $${b.deger.toFixed(2)}`);
+        yayinla('fal', falOzeti());
+        return json(res, 200, { ok: true, fal: falOzeti() });
+      }
+      // Platform fal modu: aktif | yedek | pasif.
+      if (parcalar[2] && req.method === 'PATCH') {
+        const platformAdi = decodeURIComponent(parcalar[2]);
+        const govde = await govdeOku(req);
+        falModKaydet(ayarlar, platformAdi, govde.mod);
+        log.ok(`[${platformAdi}] fal modu: ${govde.mod}`);
+        return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]), fal: falOzeti() });
+      }
+    } catch (e) {
+      return json(res, 400, { hata: String(e?.message || e) });
+    }
+    return json(res, 404, { hata: 'Bilinmeyen fal eylemi' });
   }
 
   // --- joblar ---
@@ -697,6 +763,24 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
       log.info(`${job.id}: ${sayac} task yeniden sıraya alındı`);
       if (govde.run !== false) jobuArkaPlandaCalistir(job, ayarlar);
       return json(res, 200, jobOzet(job));
+    }
+
+    // Tek task'ı fal API ile üret ("fal ile dene" butonu).
+    if (eylem === 'fal' && req.method === 'POST') {
+      const govde = await govdeOku(req);
+      if (!ayarlar.fal?.apiKey) return json(res, 400, { hata: 'fal API anahtarı tanımlı değil.' });
+      if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'Bu iş zaten çalışıyor — bitince dene.' });
+      durum.kosanJoblar.add(job.id);
+      yayinla('kosu', { id: job.id, kosuyor: true });
+      taskiFalIleCalistir(job, govde.taskId, ayarlar)
+        .catch((e) => log.err(`${job.id}/${govde.taskId} fal üretimi: ${e.message}`))
+        .finally(() => {
+          durum.kosanJoblar.delete(job.id);
+          yayinla('kosu', { id: job.id, kosuyor: false });
+          yayinla('job', jobOzet(jobOku(job.id)));
+          yayinla('fal', falOzeti());
+        });
+      return json(res, 202, { ok: true });
     }
 
     // Baskı seçimi / basıldı işareti: { dosya, secili?, basildi? }
@@ -789,8 +873,23 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
 export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram = true } = {}) {
   const ayarlar = ayarlariYukle(ayarlarDosyasi);
+  sunucuAyarlar = ayarlar;
   const erisim = erisimAyarlariniYukle();
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+  // fal bakiyesi: açılışta bir kez, sonra 5 dk'da bir (anahtar varsa).
+  // Değişiklik SSE ile yayınlanır — header rozeti elle yenileme istemez.
+  const falSayaci = setInterval(() => {
+    if (!ayarlar.fal?.apiKey) return;
+    falAdaptoru.bakiyeTazele(ayarlar).then(() => yayinla('fal', falOzeti())).catch(() => {});
+  }, 5 * 60 * 1000);
+  falSayaci.unref?.();
+  if (ayarlar.fal?.apiKey) {
+    falAdaptoru.bakiyeTazele(ayarlar, true).then((b) => {
+      if (b.deger !== null) log.info(`fal bakiyesi: $${b.deger.toFixed(2)}`);
+      yayinla('fal', falOzeti());
+    }).catch(() => {});
+  }
 
   // Telegram botu panelle aynı süreçte koşar: aynı kuyruk, aynı runner, aynı
   // canlı akış. Bottan gelen iş de panelden gelen iş gibi "Durdur" edilebilir.
@@ -870,6 +969,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
 
   const kapat = async () => {
     clearInterval(bekci);
+    clearInterval(falSayaci);
     if (durum.telegram) durum.telegram.durdur();
     // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
     try {

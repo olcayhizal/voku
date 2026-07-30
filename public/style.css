@@ -339,6 +339,54 @@ h3 {
   color: var(--paper);
 }
 
+/* ---------------- fal.ai yedek üretim ---------------- */
+.havuz-pasif { color: var(--paper-dim); }
+.hesap-kart.pasif { opacity: 0.55; }
+.hesap-kart.pasif .havuz-satir { opacity: 1; }
+
+/* Header'daki bakiye lambası: $5 altı kırmızı yanar. */
+.lamba-fal.kritik { color: var(--grease); }
+.lamba-fal.kritik i { background: var(--grease); animation: lamba-yanip 1.2s ease-in-out infinite; }
+@keyframes lamba-yanip { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .lamba-fal.kritik i { animation: none; } }
+
+/* Platform kartı başındaki "her şey fal'a gidiyor" uyarısı. */
+.fal-uyari {
+  margin: 10px 0 2px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--grease);
+  background: color-mix(in srgb, var(--grease) 12%, transparent);
+  color: var(--paper);
+  font-size: 12.5px;
+  line-height: 1.45;
+  border-radius: 2px;
+}
+
+.fal-kart { border-left-color: var(--safelight-loş); }
+.fal-mod {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  font-size: 11px;
+}
+.fal-mod-btn.secili {
+  background: var(--safelight);
+  color: #1c1a16;
+  border-color: var(--safelight);
+}
+.fal-anahtar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.fal-anahtar input { max-width: 260px; font-family: var(--mono); font-size: 12px; }
+
+/* Karedeki "fal ile dene" kestirmesi — ücretli olduğu belli olsun. */
+.kare-eylemler { display: inline-flex; gap: 6px; }
+.kare-fal { color: var(--safelight); border-color: var(--safelight-loş); }
+
 /* Lambanın yanındaki "yeni sekmede aç" oku (dış erişim bağlantısı). */
 .lamba-link {
   margin-left: 5px;
@@ -823,7 +871,7 @@ main { padding: 22px 20px 26px; max-width: 1360px; margin: 0 auto; }
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
 }
 
-input[type="text"], input[type="tel"], input[type="number"], textarea, select {
+input[type="text"], input[type="tel"], input[type="number"], input[type="password"], textarea, select {
   background: var(--bath);
   border: 1px solid var(--edge);
   border-radius: var(--r);

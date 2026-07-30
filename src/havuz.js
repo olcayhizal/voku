@@ -80,16 +80,38 @@ function dinlenmedeMi(d) {
   return true;
 }
 
+function kiralanabilir(platformAdi, h) {
+  const d = hesapDurumu(platformAdi, h.ad);
+  if (h.aktif === false || dinlenmedeMi(d)) return null;
+  const kapasite = Math.max(1, Number(h.concurrency) || 1);
+  if (d.slot >= kapasite) return null;
+  return d;
+}
+
 /**
  * Failover sırasıyla uygun ilk hesabı kiralar (slot++). Yoksa null.
- * @param {Array<{ad, concurrency}>} hesaplar sıralı hesap listesi
+ *
+ * `yedek: true` hesaplar (fal) ancak asıl hesapların HİÇBİRİ kullanılabilir
+ * değilken (hepsi dinlenmede/pasif) devreye girer — asıl hesapların slotları
+ * yalnızca dolu ise beklenir, yedeğe kaçılmaz (fal ücretli).
+ * @param {Array<{ad, concurrency, aktif?, yedek?}>} hesaplar sıralı hesap listesi
  */
 export function kirala(platformAdi, hesaplar) {
-  for (const h of hesaplar) {
-    const d = hesapDurumu(platformAdi, h.ad);
-    if (dinlenmedeMi(d)) continue;
-    const kapasite = Math.max(1, Number(h.concurrency) || 1);
-    if (d.slot < kapasite) {
+  const asil = hesaplar.filter((h) => !h.yedek);
+  for (const h of asil) {
+    const d = kiralanabilir(platformAdi, h);
+    if (d) {
+      d.slot += 1;
+      return h;
+    }
+  }
+  const asilUygunVar = asil.some(
+    (h) => h.aktif !== false && !dinlenmedeMi(hesapDurumu(platformAdi, h.ad))
+  );
+  if (asilUygunVar) return null; // asıl hesap var ama slotları dolu — bekle
+  for (const h of hesaplar.filter((x) => x.yedek)) {
+    const d = kiralanabilir(platformAdi, h);
+    if (d) {
       d.slot += 1;
       return h;
     }
@@ -111,13 +133,18 @@ export function dinlenmeyeAl(platformAdi, hesapAdi, resetsAt, sonHata) {
   diskeYaz();
 }
 
-/** Tüm hesaplar dinlenmedeyse en erken açılış zamanı (ms), değilse null. */
+/**
+ * Tüm hesaplar dinlenmedeyse en erken açılış zamanı (ms), uygun hesap varsa
+ * null. Pasif hesaplar kendiliğinden açılmaz — hepsi pasifse (veya liste
+ * boşsa) `Infinity` döner: bekleyerek çözülmez, kullanıcı aksiyonu gerekir.
+ */
 export function enErkenAcilis(platformAdi, hesaplar) {
-  let enErken = null;
+  let enErken = Infinity;
   for (const h of hesaplar) {
+    if (h.aktif === false) continue;
     const d = hesapDurumu(platformAdi, h.ad);
     if (!dinlenmedeMi(d)) return null; // uygun hesap var, beklemeye gerek yok
-    if (enErken === null || d.dinlenmeSonu < enErken) enErken = d.dinlenmeSonu;
+    if (d.dinlenmeSonu < enErken) enErken = d.dinlenmeSonu;
   }
   return enErken;
 }
@@ -149,6 +176,7 @@ export function havuzOzeti(platformAdi, hesaplar) {
     const dinlenmede = dinlenmedeMi(d);
     return {
       ad: h.ad,
+      aktif: h.aktif !== false,
       aktifSlot: d.slot,
       kapasite: Math.max(1, Number(h.concurrency) || 1),
       dinlenmede,

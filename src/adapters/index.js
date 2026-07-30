@@ -2,6 +2,7 @@ import * as chatgpt from './chatgpt.js';
 import * as gemini from './gemini.js';
 import * as chatgptCodex from './chatgpt-codex.js';
 import * as geminiHttp from './gemini-http.js';
+import * as fal from './fal.js';
 
 /**
  * Yeni platform: buraya bir satır ekle, runner'a dokunma.
@@ -14,6 +15,7 @@ export const ADAPTORLER = {
   gemini, // tarayıcı (gemini.google.com)
   'chatgpt-codex': chatgptCodex, // Codex CLI + image_gen, tarayıcısız
   'gemini-http': geminiHttp, // yerel gemini-web-to-api köprüsü, tarayıcısız
+  fal, // fal.ai API — web oturumlarının ücretli yedeği
 };
 
 export function adaptorAl(platformAdi) {
