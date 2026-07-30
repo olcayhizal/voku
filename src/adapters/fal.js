@@ -168,9 +168,20 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   try {
     const girdiUrl = await gorseliYukle(imagePath, apiKey);
+    // Çıktı standardı: 3:4 dikey, orta kalite. Parametre adları model
+    // ailesine göre değişiyor (gpt-image: image_size+quality, nano-banana:
+    // aspect_ratio+resolution) — model değişirse dal otomatik uyar.
+    const govde = { prompt, image_urls: [girdiUrl] };
+    if (/gpt-image/i.test(model)) {
+      govde.image_size = 'portrait_4_3'; // 3:4 dikey
+      govde.quality = 'medium';
+    } else if (/nano-banana|gemini/i.test(model)) {
+      govde.aspect_ratio = '3:4';
+      govde.resolution = '1K'; // 0.5K/1K/2K/4K içinde orta seviye
+    }
     const istek = await falIstek(`${KUYRUK_KOKU}/${model}`, apiKey, {
       method: 'POST',
-      body: JSON.stringify({ prompt, image_urls: [girdiUrl] }),
+      body: JSON.stringify(govde),
     });
     log.info(`[fal] ${model} kuyruğa alındı: ${istek.request_id}`);
 
