@@ -230,7 +230,6 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
   const taslaklar = new Map(); // chatId → { fotolar, metinler, zamanlayici, kullanici }
   const bekleyenBilgi = new Map(); // chatId → { metin, at }
   const teslimKilidi = new Set(); // jobId
-  let zincir = Promise.resolve(); // job'lar sırayla koşar — kota tek kuyruktan yanar
 
   /* ---------------- API ---------------- */
   async function tgIstek(metot, govde, { form, zamanAsimiMs = 65000 } = {}) {
@@ -484,9 +483,12 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
         (varyant === 'demo' ? '' : '\n(Damgalı istersen mesaja "demo" yaz.)')
     );
 
-    // Sırayla koş: paralel job'lar ChatGPT/Gemini kotasını aynı anda yakar.
+    // Hepsi hemen başlar. Paralellik hesap havuzunun slot muhasebesiyle
+    // sınırlı (kapasite dolunca yeni task'lar zaten kirala'da bekler) —
+    // eski "sırayla koş" zinciri hem paralelliği öldürüyordu hem de bayat
+    // job kopyasıyla bitmiş işleri yeniden üretiyordu.
     for (const job of acilan) {
-      zincir = zincir
+      Promise.resolve()
         .then(() => (calistir ? calistir(job) : jobuCalistir(job, ayarlar)))
         .catch((e) => log.err(`${job.id} çalıştırılamadı: ${e?.message || e}`));
     }

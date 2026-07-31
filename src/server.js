@@ -247,6 +247,13 @@ function durumPaketi(ayarlar) {
 
 async function jobuArkaPlandaCalistir(job, ayarlar) {
   if (durum.kosanJoblar.has(job.id)) return;
+  // Çağıranın elindeki kopya bayat olabilir (iş bu arada elle koşulup
+  // bitmiş olabilir) — diskten taze oku, bitmiş task'lar yeniden üretilmesin.
+  try {
+    job = jobOku(job.id);
+  } catch {
+    /* diskte yoksa eldeki kopyayla devam */
+  }
   durum.kosanJoblar.add(job.id);
   const kontrolcu = new AbortController();
   durum.durdurucular.set(job.id, kontrolcu);
