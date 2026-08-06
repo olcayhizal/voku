@@ -17,7 +17,8 @@
       "concurrency": 4,
       "codexConfig": {
         "model_reasoning_effort": "low"
-      }
+      },
+      "sohbetModu": true
     },
     "gemini": {
       "adapter": "gemini-http",

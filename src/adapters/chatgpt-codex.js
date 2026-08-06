@@ -273,7 +273,133 @@ function codexCiktilari(baslangicZamani, hesap) {
   return bulunan.sort((a, b) => a.zaman - b.zaman).map((x) => x.yol);
 }
 
-export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }) {
+/* ---------------- sohbet modu ----------------
+ * Her yeni `codex exec` sıfır sohbet açar: sistem promptu + araç şemaları +
+ * FOTOĞRAF her karede baştan token yakar. Sohbet modunda iş+hesap başına TEK
+ * oturum açılır; sonraki kareler `codex exec resume <id>` ile aynı sohbetin
+ * devamı olur — tekrar eden prefix önbellekten gelir, limit çok daha yavaş
+ * dolar. Aynı oturuma paralel tur gönderilemez: turlar oturum başına sıraya
+ * dizilir (farklı işler/hesaplar yine paralel koşar).
+ */
+const sohbetler = new Map(); // "outDir::hesap" → { id, kuyruk }
+
+/** Codex `--json` (JSONL) çıktısından oturum kimliğini ayıklar. */
+export function oturumKimligiCoz(ham) {
+  for (const satir of String(ham || '').split('\n')) {
+    const s = satir.trim();
+    if (!s.startsWith('{')) continue;
+    try {
+      const o = JSON.parse(s);
+      const kimlik =
+        o.session_id || o.thread_id || o.session?.id || o.thread?.id ||
+        (/session|thread/i.test(String(o.type || '')) ? o.id : null);
+      if (typeof kimlik === 'string' && kimlik.length >= 8) return kimlik;
+    } catch {
+      /* JSON olmayan satır */
+    }
+  }
+  return null;
+}
+
+export async function uret(_page, girdi) {
+  const { platform, outDir, hesap } = girdi;
+  if (platform?.sohbetModu === false) return tekSeferlikUret(girdi);
+
+  // Sohbet modu (varsayılan): iş+hesap oturumunda turlar sırayla.
+  const anahtar = `${path.resolve(outDir)}::${hesap?.ad || 'varsayılan'}`;
+  let kayit = sohbetler.get(anahtar);
+  if (!kayit) {
+    kayit = { id: null, kuyruk: Promise.resolve() };
+    sohbetler.set(anahtar, kayit);
+  }
+  const tur = kayit.kuyruk.then(() => sohbetteUret(girdi, kayit));
+  kayit.kuyruk = tur.catch(() => {}); // zincir bir hatayla kopmasın
+  return tur;
+}
+
+async function sohbetteUret(girdi, kayit) {
+  if (kayit.id) {
+    try {
+      return await turCalistir(girdi, kayit, false);
+    } catch (e) {
+      // Limit/durdurma yukarı çıkar (failover/abort oradan yönetiliyor);
+      // diğer hatalarda oturum çürümüş olabilir — yeni sohbetle bir şans daha.
+      if (e.limitDolu || girdi.signal?.aborted) throw e;
+      log.warn(`[chatgpt-codex] sohbet sürdürülemedi (${String(e.message).slice(0, 120)}) — yeni sohbet açılıyor`);
+      kayit.id = null;
+    }
+  }
+  return turCalistir(girdi, kayit, true);
+}
+
+/** Sohbet modunda tek tur: ilk tur oturumu açar, sonrakiler devam ettirir. */
+async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }, kayit, ilkMi) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const oncesi = gorselDosyalari(outDir);
+  const baslangic = Date.now() - 1000;
+  const hedef = path.join(outDir, `${baseName}.png`);
+  const codexHome = codexKoku(hesap);
+  const zamanAsimi = ayarlar?.generationTimeoutMs || 240000;
+
+  // Yeni Codex sürümlerinde image_gen bir skill: üretim isteğini sandbox
+  // İÇİNDEN ağa atıyor. workspace-write varsayılanı ağı kapattığı için izin
+  // açılmazsa "yetkilendirme hatası" ile sessizce üretmiyor.
+  const ortakArgumanlar = ['-c', 'sandbox_workspace_write.network_access=true'];
+  if (platform?.model) ortakArgumanlar.push('-m', platform.model);
+  for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
+    ortakArgumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
+  }
+
+  let ham;
+  if (ilkMi) {
+    const gorev = [
+      'Görsel üret. Kod yazma, dosya analizi yapma, açıklama yapma — sadece görsel üretimi.',
+      `Referans olarak sana verilen fotoğrafı kullan: ${path.resolve(imagePath)}`,
+      'Bu sohbette aynı fotoğraftan birden çok görsel isteyeceğim.',
+      '',
+      'İSTENEN GÖRSEL:',
+      prompt,
+      '',
+      `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
+    ].join('\n');
+    // `--json`: oturum kimliği event akışından okunur. `--ephemeral` YOK —
+    // oturum diske yazılmalı ki sonraki kareler devam ettirebilsin.
+    ham = await codexCalistir(
+      [
+        'exec', '--skip-git-repo-check', '--json',
+        '-C', outDir, '-s', 'workspace-write',
+        '-i', path.resolve(imagePath),
+        ...ortakArgumanlar, '-',
+      ],
+      { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
+    );
+    kayit.id = oturumKimligiCoz(ham);
+    if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(0, 8)}… (sonraki kareler bu sohbetten devam eder)`);
+    else log.warn('[chatgpt-codex] oturum kimliği okunamadı — sonraki kareler yeni sohbet açacak');
+    if (process.env.VOKU_CODEX_DEBUG) {
+      fs.writeFileSync(path.join(outDir, `.codex-ham-${baseName}.log`), ham);
+    }
+  } else {
+    const gorev = [
+      'Aynı referans fotoğrafı kullanarak yeni bir görsel üret. Kod yazma, açıklama yapma.',
+      '',
+      'İSTENEN GÖRSEL:',
+      prompt,
+      '',
+      `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
+    ].join('\n');
+    ham = await codexCalistir(
+      ['exec', 'resume', kayit.id, '--skip-git-repo-check', ...ortakArgumanlar, '-'],
+      { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
+    );
+    log.info(`[chatgpt-codex] sohbetten devam: ${kayit.id.slice(0, 8)}… → ${baseName}`);
+  }
+
+  return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+}
+
+/** Eski davranış (sohbetModu:false): her kare kendi tek seferlik oturumunda. */
+async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }) {
   fs.mkdirSync(outDir, { recursive: true });
   const oncesi = gorselDosyalari(outDir);
   const baslangic = Date.now() - 1000;
@@ -299,6 +425,9 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     outDir,
     '-s',
     'workspace-write',
+    // imagegen skill'i üretim isteğini sandbox içinden ağa atıyor (yeni Codex).
+    '-c',
+    'sandbox_workspace_write.network_access=true',
     '-i',
     path.resolve(imagePath),
   ];
@@ -352,6 +481,11 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     fs.rmSync(semaDosyasi, { force: true });
   }
 
+  return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+}
+
+/** Codex çıktısından üretilen dosyaları bulur, gerekirse iş klasörüne taşır. */
+function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
   // 1) Şemalı cevaptaki yollar — üretimden önce de var olan dosyaları alma.
   const yollar = new Set();
   const eslesme = ham.match(/\{[\s\S]*"files"[\s\S]*\}/);
@@ -386,6 +520,16 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   const gecerli = [...yollar].filter((y) => fs.existsSync(y) && fs.statSync(y).size > 1024);
   if (!gecerli.length) {
+    // Görsel servisi erişimi reddettiyse (403 / yetkilendirme) bu hesap şu an
+    // üretemiyor demektir — genelde görsel kotası dolmuştur ama Codex bunu
+    // "usage limit" metniyle DEĞİL servis hatasıyla veriyor. Havuzun
+    // failover'ı tetiklensin diye limit hatası olarak sınıflandırılır.
+    if (/403|forbidden|yetkilendir|authorization|unauthorized|erişim hata/i.test(ham)) {
+      const e = new Error('Codex görsel servisi erişimi reddetti (403) — hesabın görsel kotası dolmuş olabilir.');
+      e.limitDolu = true;
+      e.resetsAt = Date.now() + 30 * 60 * 1000;
+      throw e;
+    }
     const kuyruk = ham.trim().split('\n').slice(-3).join(' ').slice(0, 300);
     throw new Error(`Codex görsel üretmedi. Son çıktı: ${kuyruk || '(boş)'}`);
   }
