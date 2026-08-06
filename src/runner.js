@@ -101,6 +101,7 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       const dosyalar = await etkinAdaptor.uret(null, {
         imagePath: job.inputImage,
         prompt: task.prompt,
+        promptId: task.promptId,
         outDir: varyantDizini(job, 'uretim'),
         baseName: `${task.id}-${platformAdi}`,
         sel,
@@ -267,6 +268,7 @@ async function taskiIsleBasit(job, task, page, adaptor, platformAdi, sel, ayarla
       const dosyalar = await adaptor.uret(page, {
         imagePath: job.inputImage,
         prompt: task.prompt,
+        promptId: task.promptId,
         outDir: varyantDizini(job, 'uretim'),
         baseName: `${task.id}-${platformAdi}`,
         sel,

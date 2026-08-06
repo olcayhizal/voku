@@ -9,10 +9,12 @@
  * Not: görsel üreten turlar Codex kullanım limitini metin turlarına göre
  * 3-5 kat hızlı tüketir — eşzamanlılığı ölçülü tut.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { OUTPUT_DIR } from '../paths.js';
 import { komutCagrisi } from '../platform.js';
 import { log } from '../logger.js';
 
@@ -275,13 +277,24 @@ function codexCiktilari(baslangicZamani, hesap) {
 
 /* ---------------- sohbet modu ----------------
  * Her yeni `codex exec` sıfır sohbet açar: sistem promptu + araç şemaları +
- * FOTOĞRAF her karede baştan token yakar. Sohbet modunda iş+hesap başına TEK
- * oturum açılır; sonraki kareler `codex exec resume <id>` ile aynı sohbetin
- * devamı olur — tekrar eden prefix önbellekten gelir, limit çok daha yavaş
- * dolar. Aynı oturuma paralel tur gönderilemez: turlar oturum başına sıraya
- * dizilir (farklı işler/hesaplar yine paralel koşar).
+ * fotoğraf her seferinde baştan token yakar. Sohbet modunda her PROMPT
+ * ŞABLONU (hesap başına) kendi kalıcı sohbetini tutar; her yeni iş o sohbete
+ * `codex exec resume <id> -i <yeni foto>` ile yeni bir tur olarak eklenir.
+ * Tekrar eden prefix önbellekten gelir, limit çok daha yavaş dolar — ve aynı
+ * işin farklı prompt'ları FARKLI sohbetler olduğundan paralellik bozulmaz.
+ * Aynı sohbete paralel tur gönderilemez: turlar sohbet başına sıraya dizilir
+ * (aynı prompt'un art arda işleri serileşir, gerisi paraleldir).
  */
-const sohbetler = new Map(); // "outDir::hesap" → { id, kuyruk }
+const sohbetler = new Map(); // "hesap::promptId::promptOzeti" → { id, tur, kuyruk }
+
+/**
+ * Sohbet anahtarı prompt METNİNİ de içerir: şablon panelden düzenlenirse
+ * eski sohbet (eski talimatlarıyla) kullanılmaz, taze sohbet açılır.
+ */
+function sohbetAnahtari(hesap, promptId, prompt) {
+  const ozet = crypto.createHash('md5').update(String(prompt || '')).digest('hex').slice(0, 8);
+  return `${hesap?.ad || 'varsayılan'}::${promptId || 'p'}::${ozet}`;
+}
 
 /** Codex `--json` (JSONL) çıktısından oturum kimliğini ayıklar. */
 export function oturumKimligiCoz(ham) {
@@ -302,14 +315,14 @@ export function oturumKimligiCoz(ham) {
 }
 
 export async function uret(_page, girdi) {
-  const { platform, outDir, hesap } = girdi;
+  const { platform, hesap, promptId, prompt } = girdi;
   if (platform?.sohbetModu === false) return tekSeferlikUret(girdi);
 
-  // Sohbet modu (varsayılan): iş+hesap oturumunda turlar sırayla.
-  const anahtar = `${path.resolve(outDir)}::${hesap?.ad || 'varsayılan'}`;
+  // Sohbet modu (varsayılan): prompt şablonunun sohbetinde turlar sırayla.
+  const anahtar = sohbetAnahtari(hesap, promptId, prompt);
   let kayit = sohbetler.get(anahtar);
   if (!kayit) {
-    kayit = { id: null, kuyruk: Promise.resolve() };
+    kayit = { id: null, tur: 0, kuyruk: Promise.resolve() };
     sohbetler.set(anahtar, kayit);
   }
   const tur = kayit.kuyruk.then(() => sohbetteUret(girdi, kayit));
@@ -318,6 +331,15 @@ export async function uret(_page, girdi) {
 }
 
 async function sohbetteUret(girdi, kayit) {
+  // Sohbet sonsuz uzayamaz: her tur bir fotoğraf ekliyor, bağlam sınırına
+  // yaklaşmadan belli tur sayısında taze sohbete dönülür (cache sıfırlanır
+  // ama bir kereliğine — sonraki turlar yine önbellekten gelir).
+  const sinir = Number(girdi.platform?.sohbetTurSiniri) || 12;
+  if (kayit.id && kayit.tur >= sinir) {
+    log.info(`[chatgpt-codex] sohbet ${kayit.id.slice(0, 8)}… ${kayit.tur} tura ulaştı — taze sohbet açılıyor`);
+    kayit.id = null;
+    kayit.tur = 0;
+  }
   if (kayit.id) {
     try {
       return await turCalistir(girdi, kayit, false);
@@ -327,6 +349,7 @@ async function sohbetteUret(girdi, kayit) {
       if (e.limitDolu || girdi.signal?.aborted) throw e;
       log.warn(`[chatgpt-codex] sohbet sürdürülemedi (${String(e.message).slice(0, 120)}) — yeni sohbet açılıyor`);
       kayit.id = null;
+      kayit.tur = 0;
     }
   }
   return turCalistir(girdi, kayit, true);
@@ -354,8 +377,8 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
   if (ilkMi) {
     const gorev = [
       'Görsel üret. Kod yazma, dosya analizi yapma, açıklama yapma — sadece görsel üretimi.',
-      `Referans olarak sana verilen fotoğrafı kullan: ${path.resolve(imagePath)}`,
-      'Bu sohbette aynı fotoğraftan birden çok görsel isteyeceğim.',
+      `Referans fotoğraf bu mesaja ekli: ${path.resolve(imagePath)}`,
+      'Bu sohbette sana her mesajda YENİ bir referans fotoğraf vereceğim; her turda yalnız o mesajın fotoğrafını kullan.',
       '',
       'İSTENEN GÖRSEL:',
       prompt,
@@ -363,25 +386,31 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
     ].join('\n');
     // `--json`: oturum kimliği event akışından okunur. `--ephemeral` YOK —
-    // oturum diske yazılmalı ki sonraki kareler devam ettirebilsin.
+    // oturum diske yazılmalı ki sonraki işler devam ettirebilsin. Sohbet
+    // işler arası yaşadığı için sandbox kökü tek işin klasörü değil tüm
+    // çıktı kökü olmalı — sonraki turlar başka işlerin klasörüne yazacak.
+    const sandboxKoku = path.resolve(outDir).startsWith(path.resolve(OUTPUT_DIR))
+      ? OUTPUT_DIR
+      : outDir;
     ham = await codexCalistir(
       [
         'exec', '--skip-git-repo-check', '--json',
-        '-C', outDir, '-s', 'workspace-write',
+        '-C', sandboxKoku, '-s', 'workspace-write',
         '-i', path.resolve(imagePath),
         ...ortakArgumanlar, '-',
       ],
-      { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
+      { timeoutMs: zamanAsimi, cwd: sandboxKoku, signal, stdin: gorev, codexHome }
     );
     kayit.id = oturumKimligiCoz(ham);
-    if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(0, 8)}… (sonraki kareler bu sohbetten devam eder)`);
-    else log.warn('[chatgpt-codex] oturum kimliği okunamadı — sonraki kareler yeni sohbet açacak');
+    if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(0, 8)}… (bu prompt'un sonraki işleri buradan devam eder)`);
+    else log.warn('[chatgpt-codex] oturum kimliği okunamadı — sonraki tur yeni sohbet açacak');
     if (process.env.VOKU_CODEX_DEBUG) {
       fs.writeFileSync(path.join(outDir, `.codex-ham-${baseName}.log`), ham);
     }
   } else {
     const gorev = [
-      'Aynı referans fotoğrafı kullanarak yeni bir görsel üret. Kod yazma, açıklama yapma.',
+      `Bu mesaja YENİ bir referans fotoğraf ekledim: ${path.resolve(imagePath)}`,
+      'Önceki fotoğrafları değil, yalnız bu yeni fotoğrafı kullan. Kod yazma, açıklama yapma.',
       '',
       'İSTENEN GÖRSEL:',
       prompt,
@@ -389,13 +418,19 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
     ].join('\n');
     ham = await codexCalistir(
-      ['exec', 'resume', kayit.id, '--skip-git-repo-check', ...ortakArgumanlar, '-'],
+      [
+        'exec', 'resume', kayit.id, '--skip-git-repo-check',
+        '-i', path.resolve(imagePath),
+        ...ortakArgumanlar, '-',
+      ],
       { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
     );
-    log.info(`[chatgpt-codex] sohbetten devam: ${kayit.id.slice(0, 8)}… → ${baseName}`);
+    log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(0, 8)}… → ${baseName}`);
   }
 
-  return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+  const dosyalar = dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+  kayit.tur += 1;
+  return dosyalar;
 }
 
 /** Eski davranış (sohbetModu:false): her kare kendi tek seferlik oturumunda. */
