@@ -25,6 +25,10 @@ const FAL_MODELLERI = {
 
 const FAL_MODLARI = ['aktif', 'yedek', 'pasif'];
 
+// ChatGPT üretim motoru: codex = CLI (Codex kotası), web = tarayıcı
+// (chatgpt.com görsel hakkı). İki kota bağımsız — panelden geçilebilir.
+const MOTORLAR = ['codex', 'web'];
+
 export function ayarlariYukle(dosya) {
   const p = dosya ? path.resolve(dosya) : path.join(CONFIG_DIR, 'settings.json');
   if (!fs.existsSync(p)) throw new Error(`Ayar dosyası yok: ${p}`);
@@ -43,8 +47,28 @@ export function ayarlariYukle(dosya) {
     plt.hesaplar = hesaplariNormalize(plt);
     plt.falModel = plt.falModel || FAL_MODELLERI[plt.adapter] || null;
     plt.falMod = FAL_MODLARI.includes(plt.falMod) ? plt.falMod : 'yedek';
+    if (plt.adapter === 'chatgpt-codex') {
+      plt.motor = MOTORLAR.includes(plt.motor) ? plt.motor : 'codex';
+    }
   }
   return s;
+}
+
+/** ChatGPT üretim motorunu değiştirir: codex | web. */
+export function motorKaydet(ayarlar, platformAdi, motor) {
+  if (!MOTORLAR.includes(motor)) {
+    throw new Error(`Geçersiz motor: ${motor} (codex/web olmalı).`);
+  }
+  const ham = hamAyarOku();
+  const plt = ham.platforms?.[platformAdi];
+  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  if (plt.adapter !== 'chatgpt-codex') {
+    throw new Error(`${platformAdi} motor seçimini desteklemiyor.`);
+  }
+  plt.motor = motor;
+  hamAyarYaz(ham);
+  ayarlar.platforms[platformAdi].motor = motor;
+  return motor;
 }
 
 const AYAR_YOLU = path.join(CONFIG_DIR, 'settings.json');

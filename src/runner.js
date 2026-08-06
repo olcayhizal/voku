@@ -181,15 +181,22 @@ async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, 
   // Havuz = asıl hesaplar + yedekler. Yedek sırası bilinçli: önce tarayıcı
   // (Codex kotasından AYRI sayılan ücretsiz web hakkı), sonra fal (ücretli).
   // Pasif hesaplar listede kalır ama kirala/enErkenAcilis onları atlar.
-  const webHesaplar = platform.hesaplar || [];
+  // Motor "web" seçiliyse Codex hesapları hiç kullanılmaz — tarayıcı asıldır.
+  let asilHesaplar = platform.hesaplar || [];
   const yedekler = [];
   if ((platform.adapter || platformAdi) === 'chatgpt-codex') {
-    const t = tarayiciYedegi.sanalHesap(platform);
-    if (t) yedekler.push(t);
+    if (platform.motor === 'web') {
+      const t = tarayiciYedegi.sanalHesap(platform, { yedek: false });
+      asilHesaplar = t ? [t] : [];
+      if (!t) log.warn(`[${platformAdi}] motor "web" ama tarayıcı profili yok — önce tarayıcı girişi gerekli`);
+    } else {
+      const t = tarayiciYedegi.sanalHesap(platform);
+      if (t) yedekler.push(t);
+    }
   }
   const falHesap = falAdaptoru.sanalHesap(ayarlar, platform);
   if (falHesap) yedekler.push(falHesap);
-  const hesaplar = [...webHesaplar, ...yedekler];
+  const hesaplar = [...asilHesaplar, ...yedekler];
   const kuyruk = tasklar.filter((t) => t.status !== 'done');
 
   if (!hesaplar.some((h) => h.aktif !== false)) {

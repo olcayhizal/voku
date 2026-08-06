@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, OUTPUT_DIR } from './paths.js';
-import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla, falAnahtarKaydet, falModKaydet } from './config.js';
+import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla, falAnahtarKaydet, falModKaydet, motorKaydet } from './config.js';
 import { jobOlustur, waLinki, kaynakNormalize } from './job.js';
 import {
   jobOku,
@@ -23,6 +23,7 @@ import { odaOzeti, sayfaBul, sayfayiBas, basimiGeriAl, etdxUret } from './sayfa.
 import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import * as falAdaptoru from './adapters/fal.js';
+import * as codexAdaptoru from './adapters/chatgpt-codex.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
@@ -155,7 +156,13 @@ function oturumDurumu(platform, hesap) {
 
   // Sürücü kendi giriş durumunu biliyorsa (Codex) onu kullan.
   if (typeof adaptor.girisDurumu === 'function') {
-    return { ...ortak, ...adaptor.girisDurumu(platform, hesap), pencereAcik: false };
+    return {
+      ...ortak,
+      ...adaptor.girisDurumu(platform, hesap),
+      // Kalan Codex hakkı (wham/usage, periyodik tazelenen cache'ten).
+      limit: adaptor.limitOku ? adaptor.limitOku(hesap) : null,
+      pencereAcik: false,
+    };
   }
 
   const profil = hesap?.profileDir || platform.profileDir;
@@ -226,6 +233,7 @@ function platformDurumu(platform) {
     enabled: platform.enabled !== false,
     adapter: platform.adapter || platform.ad,
     girisTipi: adaptor.girisTipi || 'tarayici',
+    motor: platform.motor || null,
     cokluHesap: (platform.hesaplar || []).length > 1,
     oturumlar,
     hesaplar: havuz,
@@ -665,6 +673,19 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     return json(res, 404, { hata: 'Bilinmeyen hesap eylemi' });
   }
 
+  // --- platform ayarı (motor: codex/web) ---
+  if (parcalar[1] === 'platform' && parcalar[2] && req.method === 'PATCH') {
+    const platformAdi = decodeURIComponent(parcalar[2]);
+    try {
+      const govde = await govdeOku(req);
+      motorKaydet(ayarlar, platformAdi, govde.motor);
+      log.ok(`[${platformAdi}] üretim motoru: ${govde.motor === 'web' ? 'ChatGPT Web (tarayıcı)' : 'Codex CLI'}`);
+      return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
+    } catch (e) {
+      return json(res, 400, { hata: String(e?.message || e) });
+    }
+  }
+
   // --- fal.ai yedek üretim ---
   if (parcalar[1] === 'fal') {
     try {
@@ -899,6 +920,23 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     falAdaptoru.bakiyeTazele(ayarlar).then(() => yayinla('fal', falOzeti())).catch(() => {});
   }, 5 * 60 * 1000);
   falSayaci.unref?.();
+
+  // Codex kalan hak rozeti: 3 dk'da bir tüm Codex hesapları için tazele.
+  const limitSayaci = setInterval(() => {
+    for (const plt of Object.values(ayarlar.platforms)) {
+      if (plt.adapter !== 'chatgpt-codex') continue;
+      Promise.all((plt.hesaplar || []).map((h) => codexAdaptoru.limitTazele(h)))
+        .then(() => yayinla('platform', platformDurumu(plt)))
+        .catch(() => {});
+    }
+  }, 3 * 60 * 1000);
+  limitSayaci.unref?.();
+  for (const plt of Object.values(ayarlar.platforms)) {
+    if (plt.adapter !== 'chatgpt-codex') continue;
+    Promise.all((plt.hesaplar || []).map((h) => codexAdaptoru.limitTazele(h)))
+      .then(() => yayinla('platform', platformDurumu(plt)))
+      .catch(() => {});
+  }
   if (ayarlar.fal?.apiKey) {
     falAdaptoru.bakiyeTazele(ayarlar, true).then((b) => {
       if (b.deger !== null) log.info(`fal bakiyesi: $${b.deger.toFixed(2)}`);
@@ -985,6 +1023,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   const kapat = async () => {
     clearInterval(bekci);
     clearInterval(falSayaci);
+    clearInterval(limitSayaci);
     if (durum.telegram) durum.telegram.durdur();
     // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
     try {

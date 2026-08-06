@@ -18,7 +18,9 @@
       "codexConfig": {
         "model_reasoning_effort": "low"
       },
-      "sohbetModu": true
+      "sohbetModu": true,
+      "motor": "codex",
+      "sohbetParalel": 2
     },
     "gemini": {
       "adapter": "gemini-http",

@@ -30,11 +30,12 @@ export function profilVar(platform) {
 /**
  * Havuzdaki sanal tarayıcı hesabı. Web profili yoksa (hiç giriş yapılmamış)
  * null — havuza katılmaz; kullanıcı bir kez tarayıcıdan giriş yapmış olmalı.
+ * `yedek:false` ile ASIL hesap olarak da kullanılabilir (motor: web).
  */
-export function sanalHesap(platform) {
-  if (platform?.tarayiciYedek === false) return null;
+export function sanalHesap(platform, { yedek = true } = {}) {
+  if (yedek && platform?.tarayiciYedek === false) return null;
   if (!profilVar(platform)) return null;
-  return { ad: 'tarayıcı', saglayici: 'tarayici', yedek: true, aktif: true, concurrency: 1 };
+  return { ad: 'tarayıcı', saglayici: 'tarayici', yedek, aktif: true, concurrency: 1 };
 }
 
 async function sayfaHazirla(platform, sel, ayarlar) {

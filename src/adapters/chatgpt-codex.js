@@ -285,7 +285,76 @@ function codexCiktilari(baslangicZamani, hesap) {
  * Aynı sohbete paralel tur gönderilemez: turlar sohbet başına sıraya dizilir
  * (aynı prompt'un art arda işleri serileşir, gerisi paraleldir).
  */
-const sohbetler = new Map(); // "hesap::promptId::promptOzeti" → { id, tur, kuyruk }
+const sohbetler = new Map(); // "hesap::promptId::promptOzeti" → [{ id, tur, aktif, kuyruk }]
+
+/**
+ * Aynı prompt'un işleri paralel gelebilsin diye prompt başına birden çok
+ * sohbet tutulur (`sohbetParalel`, varsayılan 2): boşta sohbet varsa o,
+ * yoksa sınıra kadar yeni sohbet, sınır dolunca en az yüklü sohbetin
+ * kuyruğu kullanılır.
+ */
+function sohbetSec(anahtar, sinir) {
+  let liste = sohbetler.get(anahtar);
+  if (!liste) {
+    liste = [];
+    sohbetler.set(anahtar, liste);
+  }
+  const bosta = liste.find((k) => !k.aktif);
+  if (bosta) return bosta;
+  if (liste.length < Math.max(1, sinir)) {
+    const yeni = { id: null, tur: 0, aktif: 0, kuyruk: Promise.resolve() };
+    liste.push(yeni);
+    return yeni;
+  }
+  return liste.reduce((a, b) => (a.aktif <= b.aktif ? a : b));
+}
+
+/* ---------------- limit sorgusu (panel rozeti) ----------------
+ * Codex'in kalan hakkı chatgpt.com backend'inden okunur (wham/usage) —
+ * hesabın kendi auth token'ı ile. Panel sync okur (limitOku), tazeleme
+ * server'daki periyodik görevle yapılır (limitTazele).
+ */
+const limitCache = new Map(); // codexHome → { veri, zaman }
+
+export function limitOku(hesap) {
+  return limitCache.get(codexKoku(hesap))?.veri || null;
+}
+
+export async function limitTazele(hesap) {
+  const home = codexKoku(hesap);
+  const eski = limitCache.get(home);
+  if (eski && Date.now() - eski.zaman < 2 * 60 * 1000) return eski.veri;
+  try {
+    const auth = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'));
+    const token = auth?.tokens?.access_token;
+    if (!token) return null;
+    const yanit = await fetch('https://chatgpt.com/backend-api/wham/usage', {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!yanit.ok) throw new Error(`usage ${yanit.status}`);
+    const d = await yanit.json();
+    const pencere = (p) =>
+      p
+        ? {
+            yuzde: Number(p.used_percent) || 0,
+            resetAt: p.reset_at ? p.reset_at * 1000 : null,
+            pencereSn: p.limit_window_seconds || null,
+          }
+        : null;
+    const veri = {
+      plan: d.plan_type || null,
+      doldu: Boolean(d.rate_limit?.limit_reached),
+      birincil: pencere(d.rate_limit?.primary_window),
+      ikincil: pencere(d.rate_limit?.secondary_window),
+      zaman: Date.now(),
+    };
+    limitCache.set(home, { veri, zaman: Date.now() });
+    return veri;
+  } catch {
+    return eski?.veri || null; // ağ hatasında eski değer kalsın
+  }
+}
 
 /**
  * Sohbet anahtarı prompt METNİNİ de içerir: şablon panelden düzenlenirse
@@ -318,16 +387,16 @@ export async function uret(_page, girdi) {
   const { platform, hesap, promptId, prompt } = girdi;
   if (platform?.sohbetModu === false) return tekSeferlikUret(girdi);
 
-  // Sohbet modu (varsayılan): prompt şablonunun sohbetinde turlar sırayla.
+  // Sohbet modu (varsayılan): prompt şablonunun sohbet havuzundan boş
+  // sohbete düş — aynı prompt'un paralel işleri farklı sohbetlerde koşar.
   const anahtar = sohbetAnahtari(hesap, promptId, prompt);
-  let kayit = sohbetler.get(anahtar);
-  if (!kayit) {
-    kayit = { id: null, tur: 0, kuyruk: Promise.resolve() };
-    sohbetler.set(anahtar, kayit);
-  }
+  const kayit = sohbetSec(anahtar, Number(platform?.sohbetParalel) || 2);
+  kayit.aktif = (kayit.aktif || 0) + 1;
   const tur = kayit.kuyruk.then(() => sohbetteUret(girdi, kayit));
   kayit.kuyruk = tur.catch(() => {}); // zincir bir hatayla kopmasın
-  return tur;
+  return tur.finally(() => {
+    kayit.aktif -= 1;
+  });
 }
 
 async function sohbetteUret(girdi, kayit) {

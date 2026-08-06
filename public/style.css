@@ -1165,3 +1165,7 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   .kare.calisiyor .kare-alan::after { top: 0; height: 100%; animation: none; }
 }
+
+/* Motor seçici + Codex kalan hak rozeti */
+.motor-secici { margin: 10px 0 4px; }
+.limit-dolu { color: var(--grease); }

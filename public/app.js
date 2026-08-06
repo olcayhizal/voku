@@ -1153,6 +1153,7 @@ function hesapKarti(p, o, sirada) {
         onclick: (e) => hesapEszamanli(p.ad, o.hesap, (o.kapasite || 1) + 1, e.target),
       })
     ),
+    codexLimitSatiri(o),
     o.dinlenmede && o.sonHata ? el('div', { class: 'oturum-satir', text: o.sonHata.slice(0, 90) }) : null,
     o.dogrulama ? el('div', { class: 'oturum-satir', text: o.dogrulama.mesaj }) : null,
     !o.dogrulama && o.sonGiris ? el('div', { class: 'oturum-satir', text: `son giriş: ${tarih(o.sonGiris)}` }) : null,
@@ -1182,6 +1183,59 @@ function hesapKarti(p, o, sirada) {
       ? el('p', { class: 'alt-metin', text: 'Tarayıcı penceresi açıldı. Girişi orada tamamla, sonra "Girişi tamamladım"a bas.' })
       : null
   );
+}
+
+/** Codex kalan hak rozeti — wham/usage verisinden okunur. */
+function codexLimitSatiri(o) {
+  const l = o.limit;
+  if (!l) return null;
+  const pencereAdi = (p) =>
+    !p?.pencereSn ? '' : p.pencereSn <= 6 * 3600 ? '5s' : p.pencereSn <= 10 * 86400 ? 'hafta' : 'ay';
+  const parcalar = [l.birincil, l.ikincil]
+    .filter(Boolean)
+    .map((p) => `${pencereAdi(p)} %${Math.max(0, 100 - p.yuzde)} kaldı`);
+  if (l.doldu) {
+    return el('div', { class: 'oturum-satir limit-dolu', text: `Codex limiti dolu${parcalar.length ? ` · ${parcalar.join(' · ')}` : ''}` });
+  }
+  if (!parcalar.length) return null;
+  return el('div', {
+    class: 'oturum-satir',
+    text: `Codex hakkı: ${parcalar.join(' · ')}${l.plan ? ` (${l.plan})` : ''}`,
+  });
+}
+
+/** ChatGPT üretim motoru seçici: Codex CLI ↔ ChatGPT Web (ayrı kotalar). */
+function motorSecici(p) {
+  if (!p.motor) return null;
+  const modlar = [
+    { deger: 'codex', etiket: 'Codex CLI', ipucu: 'Codex kotasından üretir — hızlı ve paralel' },
+    { deger: 'web', etiket: 'ChatGPT Web', ipucu: 'chatgpt.com penceresinden üretir — Codex kotasından AYRI web hakkı, yavaş ve sıralı' },
+  ];
+  return el('div', { class: 'fal-mod motor-secici' },
+    el('span', { class: 'alt-metin', text: 'üretim motoru' }),
+    ...modlar.map((m) =>
+      el('button', {
+        class: `btn btn-kucuk fal-mod-btn${p.motor === m.deger ? ' secili' : ' btn-ikincil'}`,
+        text: m.etiket,
+        title: m.ipucu,
+        onclick: () => motorDegistir(p.ad, m.deger),
+      })
+    ),
+    p.motor === 'web'
+      ? el('span', { class: 'alt-metin', text: '— Codex hesapları bu modda kullanılmaz' })
+      : null
+  );
+}
+
+async function motorDegistir(ad, motor) {
+  try {
+    const yanit = await api(`/api/platform/${ad}`, { method: 'PATCH', body: { motor } });
+    const i = state.platformlar.findIndex((x) => x.ad === ad);
+    if (i >= 0) state.platformlar[i] = yanit.platform;
+    oturumlariCiz();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 /** fal oturum kartındaki durum satırı. */
@@ -1345,6 +1399,7 @@ function oturumlariCiz() {
           text: p.girisTipi === 'surec' ? `${p.adapter} · codex` : (p.adapter || p.ad),
         })
       ),
+      motorSecici(p),
       // Web hesaplarının hepsi devre dışıyken üretim tümüyle fal'a düşer —
       // kullanıcı maliyeti fark etmeden kuyruk yakmasın.
       p.fal?.uyari
