@@ -228,11 +228,12 @@ function hesaplariNormalize(plt) {
       };
     }
     // Web motorlu hesap: chatgpt.com'u kendi tarayıcı profiliyle kullanır
-    // (Codex kotasından ayrı web hakkı). Tek pencere → eşzamanlılık 1.
+    // (Codex kotasından ayrı web hakkı). Paralellik aynı pencerede SEKME
+    // açarak sağlanır — varsayılan 1, panelden artırılabilir.
     if (h.motor === 'web') {
       return {
         ad,
-        concurrency: 1,
+        concurrency: Number(h.concurrency) > 0 ? Number(h.concurrency) : 1,
         aktif,
         motor: 'web',
         profileDir: mutlak(h.profileDir || path.join('.profiles', `chatgpt-web-${ad}`)),

@@ -19,12 +19,14 @@ export const ad = 'chatgpt-tarayici';
 export const tarayiciGerekli = false; // havuz akışında koşar; context'i kendisi açar
 
 // Profil başına kaynak: web motorlu her hesap kendi penceresinde koşar.
-const kaynaklar = new Map(); // profileDir → { ctx, page, kuyruk }
+// Paralellik aynı pencerede SEKME ile: her tur boş sekme kiralar, yoksa
+// yenisini açar (eşzamanlı tur sayısını runner'daki hesap slotu sınırlar).
+const kaynaklar = new Map(); // profileDir → { ctx, acilis, sayfalar: [{page, mesgul}] }
 
 function kaynakAl(profil) {
   let k = kaynaklar.get(profil);
   if (!k) {
-    k = { ctx: null, page: null, kuyruk: Promise.resolve() };
+    k = { ctx: null, acilis: null, sayfalar: [] };
     kaynaklar.set(profil, k);
   }
   return k;
@@ -56,14 +58,25 @@ export function sanalHesap(platform, { yedek = true } = {}) {
   return { ad: 'tarayıcı', saglayici: 'tarayici', yedek, aktif: true, concurrency: 1 };
 }
 
-async function sayfaHazirla(kaynak, platform, profil, sel, ayarlar) {
-  if (kaynak.page && !kaynak.page.isClosed()) return kaynak.page;
-  if (kaynak.ctx) await kaynak.ctx.close().catch(() => {});
-  log.info('[chatgpt-tarayici] web penceresi açılıyor (Codex kotası ayrı — web hakkı kullanılacak)');
-  kaynak.ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar);
-  kaynak.page = await sayfaAl(kaynak.ctx);
-  await chatgptWeb.hazirla(kaynak.page, platform, sel, ayarlar);
-  return kaynak.page;
+/** Pencereyi (persistent context) açar — eşzamanlı ilk turlar tek kilitte. */
+async function contextHazirla(kaynak, platform, profil, sel, ayarlar) {
+  if (!kaynak.acilis) {
+    kaynak.acilis = (async () => {
+      log.info('[chatgpt-tarayici] web penceresi açılıyor (Codex kotası ayrı — web hakkı kullanılacak)');
+      kaynak.ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar);
+      const ilk = await sayfaAl(kaynak.ctx);
+      await chatgptWeb.hazirla(ilk, platform, sel, ayarlar);
+      kaynak.sayfalar = [{ page: ilk, mesgul: false }];
+    })().catch((e) => {
+      // Açılış başarısızsa kilidi bırak — sonraki tur yeniden denesin.
+      if (kaynak.ctx) kaynak.ctx.close().catch(() => {});
+      kaynak.ctx = null;
+      kaynak.acilis = null;
+      kaynak.sayfalar = [];
+      throw e;
+    });
+  }
+  await kaynak.acilis;
 }
 
 export async function hazirla(_page, platform, _sel, _ayarlar, hesap) {
@@ -75,36 +88,49 @@ export async function hazirla(_page, platform, _sel, _ayarlar, hesap) {
 }
 
 export async function uret(_page, girdi) {
-  // Profil başına tek pencere: o profilin turları sırayla. Kuyruk hatada kopmaz.
-  const profil = profilYolu(girdi.platform, girdi.hesap);
-  const kaynak = kaynakAl(profil);
-  const tur = kaynak.kuyruk.then(() => turCalistir(girdi, kaynak, profil));
-  kaynak.kuyruk = tur.catch(() => {});
-  return tur;
-}
-
-async function turCalistir(girdi, kaynak, profil) {
   const { platform, sel, ayarlar, signal } = girdi;
+  const profil = profilYolu(platform, girdi.hesap);
+  const kaynak = kaynakAl(profil);
   try {
-    const page = await sayfaHazirla(kaynak, platform, profil, sel, ayarlar);
-    // Web üretimi CLI'dan yavaş akar (kuyruk + akış animasyonu) — dar
-    // zaman aşımı gereksiz "üretmedi" sayar.
-    const webAyar = {
-      ...ayarlar,
-      generationTimeoutMs: Math.max(Number(ayarlar.generationTimeoutMs) || 240000, 360000),
-    };
-    const dosyalar = await chatgptWeb.uret(page, { ...girdi, ayarlar: webAyar });
-    log.ok(`[chatgpt-tarayici] web kotasından üretildi: ${dosyalar.join(', ')}`);
-    return dosyalar;
+    await contextHazirla(kaynak, platform, profil, sel, ayarlar);
+
+    // Boş sekme kirala; yoksa yeni sekme aç. Eşzamanlı tur sayısını hesap
+    // slotu (runner) sınırladığı için sekme sayısı kapasiteyi aşmaz.
+    kaynak.sayfalar = kaynak.sayfalar.filter((s) => !s.page.isClosed());
+    let sayfa = kaynak.sayfalar.find((s) => !s.mesgul);
+    if (sayfa) {
+      sayfa.mesgul = true;
+    } else {
+      sayfa = { page: await kaynak.ctx.newPage(), mesgul: true };
+      kaynak.sayfalar.push(sayfa);
+      log.info(`[chatgpt-tarayici] yeni sekme açıldı (${kaynak.sayfalar.length}. paralel üretim)`);
+    }
+
+    try {
+      // Web üretimi CLI'dan yavaş akar (kuyruk + akış animasyonu) — dar
+      // zaman aşımı gereksiz "üretmedi" sayar.
+      const webAyar = {
+        ...ayarlar,
+        generationTimeoutMs: Math.max(Number(ayarlar.generationTimeoutMs) || 240000, 360000),
+      };
+      const dosyalar = await chatgptWeb.uret(sayfa.page, { ...girdi, ayarlar: webAyar });
+      log.ok(`[chatgpt-tarayici] web kotasından üretildi: ${dosyalar.join(', ')}`);
+      return dosyalar;
+    } finally {
+      sayfa.mesgul = false;
+    }
   } catch (e) {
     if (signal?.aborted) throw e;
     // Pencere/oturum çökmüş olabilir — bir sonraki tur taze pencere açsın.
     if (/closed|crashed|Target/i.test(String(e.message))) {
-      kaynak.page = null;
+      if (kaynak.ctx) kaynak.ctx.close().catch(() => {});
+      kaynak.ctx = null;
+      kaynak.acilis = null;
+      kaynak.sayfalar = [];
     }
-    // Web de üretemiyorsa bu hesabı bir süre dinlendir ki kuyruk fal'a
-    // (varsa) düşebilsin; kısa süre — web limiti genelde çabuk açılır.
-    const y = new Error(`Tarayıcı yedeği üretemedi: ${String(e.message).slice(0, 160)}`);
+    // Web de üretemiyorsa bu hesabı bir süre dinlendir ki kuyruk diğer
+    // hesaba/fal'a düşebilsin; kısa süre — web limiti genelde çabuk açılır.
+    const y = new Error(`Tarayıcı üretemedi: ${String(e.message).slice(0, 160)}`);
     y.limitDolu = true;
     y.resetsAt = Date.now() + 15 * 60 * 1000;
     throw y;
