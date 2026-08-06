@@ -67,11 +67,12 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       continue;
     }
 
-    // Sanal hesaplar kendi sürücüsüyle üretir: tarayıcı=web kotası, fal=API.
+    // Hesap kendi sürücüsüyle üretir: web motorlu / sanal tarayıcı hesabı
+    // Playwright'la chatgpt.com'dan, fal API'den, gerisi platform sürücüsünden.
     const etkinAdaptor =
       hesap.saglayici === 'fal'
         ? falAdaptoru
-        : hesap.saglayici === 'tarayici'
+        : hesap.saglayici === 'tarayici' || hesap.motor === 'web'
           ? tarayiciYedegi
           : adaptor;
 
@@ -181,18 +182,11 @@ async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, 
   // Havuz = asıl hesaplar + yedekler. Yedek sırası bilinçli: önce tarayıcı
   // (Codex kotasından AYRI sayılan ücretsiz web hakkı), sonra fal (ücretli).
   // Pasif hesaplar listede kalır ama kirala/enErkenAcilis onları atlar.
-  // Motor "web" seçiliyse Codex hesapları hiç kullanılmaz — tarayıcı asıldır.
-  let asilHesaplar = platform.hesaplar || [];
+  const asilHesaplar = platform.hesaplar || [];
   const yedekler = [];
   if ((platform.adapter || platformAdi) === 'chatgpt-codex') {
-    if (platform.motor === 'web') {
-      const t = tarayiciYedegi.sanalHesap(platform, { yedek: false });
-      asilHesaplar = t ? [t] : [];
-      if (!t) log.warn(`[${platformAdi}] motor "web" ama tarayıcı profili yok — önce tarayıcı girişi gerekli`);
-    } else {
-      const t = tarayiciYedegi.sanalHesap(platform);
-      if (t) yedekler.push(t);
-    }
+    const t = tarayiciYedegi.sanalHesap(platform);
+    if (t) yedekler.push(t);
   }
   const falHesap = falAdaptoru.sanalHesap(ayarlar, platform);
   if (falHesap) yedekler.push(falHesap);

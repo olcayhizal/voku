@@ -18,13 +18,31 @@ import { log } from '../logger.js';
 export const ad = 'chatgpt-tarayici';
 export const tarayiciGerekli = false; // havuz akışında koşar; context'i kendisi açar
 
-// Tek kaynak: açık context + sayfa + tur kuyruğu.
-const kaynak = { ctx: null, page: null, kuyruk: Promise.resolve() };
+// Profil başına kaynak: web motorlu her hesap kendi penceresinde koşar.
+const kaynaklar = new Map(); // profileDir → { ctx, page, kuyruk }
 
-/** Web profili hiç giriş görmemişse yedek hiç denenmesin. */
-export function profilVar(platform) {
-  const dizin = platform?.profileDir;
-  return Boolean(dizin && fs.existsSync(path.join(dizin, 'Default')));
+function kaynakAl(profil) {
+  let k = kaynaklar.get(profil);
+  if (!k) {
+    k = { ctx: null, page: null, kuyruk: Promise.resolve() };
+    kaynaklar.set(profil, k);
+  }
+  return k;
+}
+
+/** Hesabın (yoksa platformun) web profili. */
+function profilYolu(platform, hesap) {
+  return hesap?.profileDir || platform?.profileDir || null;
+}
+
+/** Web profili hiç giriş görmemişse denenmesin. */
+export function profilVar(platform, hesap) {
+  const dizin = profilYolu(platform, hesap);
+  return Boolean(
+    dizin &&
+      (fs.existsSync(path.join(dizin, 'Default')) ||
+        fs.existsSync(path.join(dizin, '.voku-login.json')))
+  );
 }
 
 /**
@@ -38,35 +56,37 @@ export function sanalHesap(platform, { yedek = true } = {}) {
   return { ad: 'tarayıcı', saglayici: 'tarayici', yedek, aktif: true, concurrency: 1 };
 }
 
-async function sayfaHazirla(platform, sel, ayarlar) {
+async function sayfaHazirla(kaynak, platform, profil, sel, ayarlar) {
   if (kaynak.page && !kaynak.page.isClosed()) return kaynak.page;
   if (kaynak.ctx) await kaynak.ctx.close().catch(() => {});
   log.info('[chatgpt-tarayici] web penceresi açılıyor (Codex kotası ayrı — web hakkı kullanılacak)');
-  kaynak.ctx = await contextAc(platform, ayarlar);
+  kaynak.ctx = await contextAc({ ...platform, profileDir: profil }, ayarlar);
   kaynak.page = await sayfaAl(kaynak.ctx);
   await chatgptWeb.hazirla(kaynak.page, platform, sel, ayarlar);
   return kaynak.page;
 }
 
-export async function hazirla(_page, platform) {
-  if (!profilVar(platform)) {
+export async function hazirla(_page, platform, _sel, _ayarlar, hesap) {
+  if (!profilVar(platform, hesap)) {
     throw new Error(
-      'ChatGPT web profili yok — tarayıcı yedeği için bir kez panelin tarayıcı girişiyle chatgpt.com oturumu açılmalı.'
+      `ChatGPT web profili yok — "${hesap?.ad || 'tarayıcı'}" hesabı için önce panelden tarayıcı girişi yapılmalı.`
     );
   }
 }
 
 export async function uret(_page, girdi) {
-  // Tek pencere: turlar sırayla. Kuyruk hatada kopmaz.
-  const tur = kaynak.kuyruk.then(() => turCalistir(girdi));
+  // Profil başına tek pencere: o profilin turları sırayla. Kuyruk hatada kopmaz.
+  const profil = profilYolu(girdi.platform, girdi.hesap);
+  const kaynak = kaynakAl(profil);
+  const tur = kaynak.kuyruk.then(() => turCalistir(girdi, kaynak, profil));
   kaynak.kuyruk = tur.catch(() => {});
   return tur;
 }
 
-async function turCalistir(girdi) {
+async function turCalistir(girdi, kaynak, profil) {
   const { platform, sel, ayarlar, signal } = girdi;
   try {
-    const page = await sayfaHazirla(platform, sel, ayarlar);
+    const page = await sayfaHazirla(kaynak, platform, profil, sel, ayarlar);
     // Web üretimi CLI'dan yavaş akar (kuyruk + akış animasyonu) — dar
     // zaman aşımı gereksiz "üretmedi" sayar.
     const webAyar = {
@@ -91,9 +111,10 @@ async function turCalistir(girdi) {
   }
 }
 
-/** Panel kapanırken açık pencereyi bırakma. */
+/** Panel kapanırken açık pencereleri bırakma. */
 export async function kapat() {
-  if (kaynak.ctx) await kaynak.ctx.close().catch(() => {});
-  kaynak.ctx = null;
-  kaynak.page = null;
+  for (const k of kaynaklar.values()) {
+    if (k.ctx) await k.ctx.close().catch(() => {});
+  }
+  kaynaklar.clear();
 }

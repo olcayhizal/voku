@@ -1169,3 +1169,15 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
 /* Motor seçici + Codex kalan hak rozeti */
 .motor-secici { margin: 10px 0 4px; }
 .limit-dolu { color: var(--grease); }
+.hesap-ekle-form { display: grid; gap: 7px; }
+.hesap-ekle-form input { max-width: 260px; }
+.motor-rozet {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--safelight);
+  border: 1px solid var(--safelight-loş);
+  border-radius: 2px;
+  padding: 0 4px;
+}

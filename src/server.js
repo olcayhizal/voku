@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT, OUTPUT_DIR } from './paths.js';
-import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla, falAnahtarKaydet, falModKaydet, motorKaydet } from './config.js';
+import { ayarlariYukle, promptlariYukle, promptlariKaydet, promptDosyaYolu, hesapEkle, hesapSil, hesapAyarla, falAnahtarKaydet, falModKaydet } from './config.js';
 import { jobOlustur, waLinki, kaynakNormalize } from './job.js';
 import {
   jobOku,
@@ -144,18 +144,21 @@ function oturumDurumu(platform, hesap) {
   const adaptor = adaptorAl(platform.adapter || platform.ad);
   const anahtar = hesapAnahtar(platform.ad, hesap?.ad);
   const surecKaydi = durum.girisSurecleri.get(anahtar);
+  const webHesabi = hesap?.motor === 'web';
   const ortak = {
     hesap: hesap?.ad || 'varsayılan',
-    girisTipi: adaptor.girisTipi || 'tarayici',
+    motor: hesap?.motor || null,
+    // Web motorlu hesap Codex değil tarayıcı penceresiyle giriş yapar.
+    girisTipi: webHesabi ? 'tarayici' : adaptor.girisTipi || 'tarayici',
     dogrulama: durum.dogrulama.get(anahtar) || null,
     girisSuruyor: Boolean(surecKaydi),
     girisUrl: surecKaydi?.url || null,
     girisCikti: surecKaydi ? surecKaydi.satirlar.slice(-8).join('') : null,
-    ipucu: adaptor.girisKomutu?.(platform, hesap)?.ipucu || null,
+    ipucu: webHesabi ? null : adaptor.girisKomutu?.(platform, hesap)?.ipucu || null,
   };
 
   // Sürücü kendi giriş durumunu biliyorsa (Codex) onu kullan.
-  if (typeof adaptor.girisDurumu === 'function') {
+  if (!webHesabi && typeof adaptor.girisDurumu === 'function') {
     return {
       ...ortak,
       ...adaptor.girisDurumu(platform, hesap),
@@ -233,7 +236,6 @@ function platformDurumu(platform) {
     enabled: platform.enabled !== false,
     adapter: platform.adapter || platform.ad,
     girisTipi: adaptor.girisTipi || 'tarayici',
-    motor: platform.motor || null,
     cokluHesap: (platform.hesaplar || []).length > 1,
     oturumlar,
     hesaplar: havuz,
@@ -364,7 +366,7 @@ async function loginBaslat(platformAdi, ayarlar, hesapAd) {
   const anahtar = hesapAnahtar(platformAdi, hesap.ad);
   const adaptor = adaptorAl(platform.adapter || platformAdi);
 
-  if (adaptor.girisTipi === 'surec') {
+  if (adaptor.girisTipi === 'surec' && hesap.motor !== 'web') {
     return surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar, hesap);
   }
   if (durum.loginContextleri.has(anahtar)) return { zatenAcik: true };
@@ -646,8 +648,8 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     try {
       if (req.method === 'POST') {
         const govde = await govdeOku(req);
-        const yeni = hesapEkle(ayarlar, platformAdi, govde.ad);
-        log.ok(`[${platformAdi}] hesap eklendi: ${yeni.ad}`);
+        const yeni = hesapEkle(ayarlar, platformAdi, govde.ad, govde.motor);
+        log.ok(`[${platformAdi}] hesap eklendi: ${yeni.ad}${yeni.motor === 'web' ? ' (web motoru)' : ''}`);
         return json(res, 201, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
       }
       if (req.method === 'DELETE' && parcalar[3]) {
@@ -671,19 +673,6 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
       return json(res, 400, { hata: String(e?.message || e) });
     }
     return json(res, 404, { hata: 'Bilinmeyen hesap eylemi' });
-  }
-
-  // --- platform ayarı (motor: codex/web) ---
-  if (parcalar[1] === 'platform' && parcalar[2] && req.method === 'PATCH') {
-    const platformAdi = decodeURIComponent(parcalar[2]);
-    try {
-      const govde = await govdeOku(req);
-      motorKaydet(ayarlar, platformAdi, govde.motor);
-      log.ok(`[${platformAdi}] üretim motoru: ${govde.motor === 'web' ? 'ChatGPT Web (tarayıcı)' : 'Codex CLI'}`);
-      return json(res, 200, { ok: true, platform: platformDurumu(ayarlar.platforms[platformAdi]) });
-    } catch (e) {
-      return json(res, 400, { hata: String(e?.message || e) });
-    }
   }
 
   // --- fal.ai yedek üretim ---

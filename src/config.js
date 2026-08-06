@@ -25,8 +25,8 @@ const FAL_MODELLERI = {
 
 const FAL_MODLARI = ['aktif', 'yedek', 'pasif'];
 
-// ChatGPT üretim motoru: codex = CLI (Codex kotası), web = tarayıcı
-// (chatgpt.com görsel hakkı). İki kota bağımsız — panelden geçilebilir.
+// Hesap üretim motoru (chatgpt): codex = CLI (Codex kotası), web = tarayıcı
+// (chatgpt.com görsel hakkı). İki kota bağımsız — hesap eklerken seçilir.
 const MOTORLAR = ['codex', 'web'];
 
 export function ayarlariYukle(dosya) {
@@ -47,28 +47,8 @@ export function ayarlariYukle(dosya) {
     plt.hesaplar = hesaplariNormalize(plt);
     plt.falModel = plt.falModel || FAL_MODELLERI[plt.adapter] || null;
     plt.falMod = FAL_MODLARI.includes(plt.falMod) ? plt.falMod : 'yedek';
-    if (plt.adapter === 'chatgpt-codex') {
-      plt.motor = MOTORLAR.includes(plt.motor) ? plt.motor : 'codex';
-    }
   }
   return s;
-}
-
-/** ChatGPT üretim motorunu değiştirir: codex | web. */
-export function motorKaydet(ayarlar, platformAdi, motor) {
-  if (!MOTORLAR.includes(motor)) {
-    throw new Error(`Geçersiz motor: ${motor} (codex/web olmalı).`);
-  }
-  const ham = hamAyarOku();
-  const plt = ham.platforms?.[platformAdi];
-  if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
-  if (plt.adapter !== 'chatgpt-codex') {
-    throw new Error(`${platformAdi} motor seçimini desteklemiyor.`);
-  }
-  plt.motor = motor;
-  hamAyarYaz(ham);
-  ayarlar.platforms[platformAdi].motor = motor;
-  return motor;
 }
 
 const AYAR_YOLU = path.join(CONFIG_DIR, 'settings.json');
@@ -106,7 +86,7 @@ function tekHesabiSomutlastir(plt) {
  * o platformunun hesap listesini yeniden normalize eder (panel yeniden
  * başlamadan havuz yeni hesabı görsün).
  */
-export function hesapEkle(ayarlar, platformAdi, hesapAd) {
+export function hesapEkle(ayarlar, platformAdi, hesapAd, motor) {
   const ad = String(hesapAd || '').trim();
   if (!ad) throw new Error('Hesap adı boş olamaz.');
   if (!/^[\w.-]{1,32}$/.test(ad)) throw new Error('Hesap adı yalnız harf/rakam/.-_ olabilir (en çok 32).');
@@ -114,10 +94,16 @@ export function hesapEkle(ayarlar, platformAdi, hesapAd) {
   const ham = hamAyarOku();
   const plt = ham.platforms?.[platformAdi];
   if (!plt) throw new Error(`Bilinmeyen platform: ${platformAdi}`);
+  if (motor !== undefined && motor !== null && !MOTORLAR.includes(motor)) {
+    throw new Error(`Geçersiz motor: ${motor} (codex/web olmalı).`);
+  }
+  if (motor === 'web' && plt.adapter !== 'chatgpt-codex') {
+    throw new Error(`${platformAdi} web motorunu desteklemiyor.`);
+  }
 
   tekHesabiSomutlastir(plt);
   if (plt.hesaplar.some((h) => h.ad === ad)) throw new Error(`"${ad}" hesabı zaten var.`);
-  plt.hesaplar.push({ ad });
+  plt.hesaplar.push(motor === 'web' ? { ad, motor: 'web' } : { ad });
   hamAyarYaz(ham);
 
   ayarlar.platforms[platformAdi].hesaplar = hesaplariNormalize({ ...plt, ad: platformAdi });
@@ -241,12 +227,24 @@ function hesaplariNormalize(plt) {
         profileDir: mutlak(h.profileDir || path.join('.profiles', `gemini-${ad}`)),
       };
     }
+    // Web motorlu hesap: chatgpt.com'u kendi tarayıcı profiliyle kullanır
+    // (Codex kotasından ayrı web hakkı). Tek pencere → eşzamanlılık 1.
+    if (h.motor === 'web') {
+      return {
+        ad,
+        concurrency: 1,
+        aktif,
+        motor: 'web',
+        profileDir: mutlak(h.profileDir || path.join('.profiles', `chatgpt-web-${ad}`)),
+      };
+    }
     // codexHome açıkça null ise Codex'in kendi varsayılan dizini kullanılır
     // (somutlaştırılmış eski tek-hesap); tanımsızsa hesaba özel profil türetilir.
     return {
       ad,
       concurrency: con,
       aktif,
+      motor: 'codex',
       codexHome:
         h.codexHome === undefined
           ? mutlak(path.join('.profiles', `chatgpt-${ad}`, '.codex'))

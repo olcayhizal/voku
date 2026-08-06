@@ -1132,7 +1132,12 @@ function hesapKarti(p, o, sirada) {
   const pasif = o.aktif === false;
   return el('div', { class: `hesap-kart ${oturumSinifi(o)}${o.dinlenmede ? ' dinlenmede' : ''}${sirada ? ' sirada' : ''}${pasif ? ' pasif' : ''}` },
     el('div', { class: 'hesap-ust' },
-      el('span', { class: 'hesap-ad' }, el('span', { class: 'hesap-nokta' }), o.hesap),
+      el('span', { class: 'hesap-ad' },
+        el('span', { class: 'hesap-nokta' }),
+        o.hesap,
+        // Web motorlu hesap chatgpt.com penceresinden üretir (ayrı kota).
+        o.motor === 'web' ? el('span', { class: 'motor-rozet', text: 'web', title: 'chatgpt.com penceresinden üretir — Codex kotasından ayrı' }) : null
+      ),
       el('span', { class: 'oturum-rozet', text: oturumRozeti(o) })
     ),
     // Havuz durumu: üretimde / sırada / limitte kaç dk kaldı.
@@ -1163,7 +1168,11 @@ function hesapKarti(p, o, sirada) {
         : o.pencereAcik
           ? el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Girişi tamamladım', onclick: () => loginBitir(p.ad, o.hesap) })
           : el('button', { class: 'btn btn-ikincil btn-kucuk', text: o.profilVar ? 'Yeniden giriş' : 'Giriş yap', onclick: () => loginBaslat(p.ad, o.hesap) }),
-      el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Sına', disabled: o.pencereAcik || o.girisSuruyor, onclick: (e) => oturumSina(p.ad, o.hesap, e.target) }),
+      // Web hesabının sınaması yok — doğrulama Codex sürücüsüne özgü;
+      // web oturumu ilk üretimde kendini gösterir.
+      o.motor === 'web'
+        ? null
+        : el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Sına', disabled: o.pencereAcik || o.girisSuruyor, onclick: (e) => oturumSina(p.ad, o.hesap, e.target) }),
       // Havuzdan geçici çıkarma — oturum dosyaları silinmez, geri açılabilir.
       el('button', {
         class: `btn btn-ikincil btn-kucuk${pasif ? '' : ' btn-tehlike'}`,
@@ -1204,34 +1213,64 @@ function codexLimitSatiri(o) {
   });
 }
 
-/** ChatGPT üretim motoru seçici: Codex CLI ↔ ChatGPT Web (ayrı kotalar). */
-function motorSecici(p) {
-  if (!p.motor) return null;
-  const modlar = [
+/**
+ * Hesap ekleme formu — kartın içinde açılır: isim + (chatgpt'de) motor
+ * seçimi. Codex CLI kotası ile chatgpt.com web hakkı ayrı sayıldığı için
+ * hesap hangi motorla üreteceğini burada seçer.
+ */
+function hesapEkleFormu(p) {
+  const motorlu = (p.adapter || p.ad) === 'chatgpt-codex';
+  const motorlar = [
     { deger: 'codex', etiket: 'Codex CLI', ipucu: 'Codex kotasından üretir — hızlı ve paralel' },
-    { deger: 'web', etiket: 'ChatGPT Web', ipucu: 'chatgpt.com penceresinden üretir — Codex kotasından AYRI web hakkı, yavaş ve sıralı' },
+    { deger: 'web', etiket: 'ChatGPT Web', ipucu: 'chatgpt.com penceresinden üretir — Codex kotasından AYRI web hakkı; görünür pencere, sıralı üretim' },
   ];
-  return el('div', { class: 'fal-mod motor-secici' },
-    el('span', { class: 'alt-metin', text: 'üretim motoru' }),
-    ...modlar.map((m) =>
+  return el('div', { class: 'hesap-kart hesap-ekle-form' },
+    el('input', {
+      id: `yeniHesapAd-${p.ad}`,
+      type: 'text',
+      placeholder: 'hesap adı (örn: onur)',
+      autocomplete: 'off',
+      onkeydown: (e) => { if (e.key === 'Enter') hesapEkleGonder(p.ad); },
+    }),
+    motorlu
+      ? el('div', { class: 'fal-mod' },
+          el('span', { class: 'alt-metin', text: 'üretim motoru' }),
+          ...motorlar.map((m) =>
+            el('button', {
+              class: `btn btn-kucuk fal-mod-btn${(state.yeniHesapMotor || 'codex') === m.deger ? ' secili' : ' btn-ikincil'}`,
+              text: m.etiket,
+              title: m.ipucu,
+              onclick: () => { state.yeniHesapMotor = m.deger; oturumlariCiz(); },
+            })
+          )
+        )
+      : null,
+    el('div', { class: 'oturum-eylem' },
+      el('button', { class: 'btn btn-birincil btn-kucuk', text: 'Ekle', onclick: () => hesapEkleGonder(p.ad) }),
       el('button', {
-        class: `btn btn-kucuk fal-mod-btn${p.motor === m.deger ? ' secili' : ' btn-ikincil'}`,
-        text: m.etiket,
-        title: m.ipucu,
-        onclick: () => motorDegistir(p.ad, m.deger),
+        class: 'btn btn-ikincil btn-kucuk',
+        text: 'Vazgeç',
+        onclick: () => { state.hesapFormu = null; oturumlariCiz(); },
       })
-    ),
-    p.motor === 'web'
-      ? el('span', { class: 'alt-metin', text: '— Codex hesapları bu modda kullanılmaz' })
-      : null
+    )
   );
 }
 
-async function motorDegistir(ad, motor) {
+async function hesapEkleGonder(ad) {
+  const girdi = document.getElementById(`yeniHesapAd-${ad}`);
+  const isim = (girdi?.value || '').trim();
+  if (!isim) return alert('Hesap adı gerekli (örn: onur).');
+  const p = state.platformlar.find((x) => x.ad === ad);
+  const motorlu = (p?.adapter || ad) === 'chatgpt-codex';
   try {
-    const yanit = await api(`/api/platform/${ad}`, { method: 'PATCH', body: { motor } });
+    const yanit = await api(`/api/hesap/${ad}`, {
+      method: 'POST',
+      body: { ad: isim, ...(motorlu ? { motor: state.yeniHesapMotor || 'codex' } : {}) },
+    });
     const i = state.platformlar.findIndex((x) => x.ad === ad);
     if (i >= 0) state.platformlar[i] = yanit.platform;
+    state.hesapFormu = null;
+    state.yeniHesapMotor = 'codex';
     oturumlariCiz();
   } catch (e) {
     alert(e.message);
@@ -1399,7 +1438,6 @@ function oturumlariCiz() {
           text: p.girisTipi === 'surec' ? `${p.adapter} · codex` : (p.adapter || p.ad),
         })
       ),
-      motorSecici(p),
       // Web hesaplarının hepsi devre dışıyken üretim tümüyle fal'a düşer —
       // kullanıcı maliyeti fark etmeden kuyruk yakmasın.
       p.fal?.uyari
@@ -1410,14 +1448,22 @@ function oturumlariCiz() {
         : null,
       el('div', { class: 'hesap-listesi' },
         ...oturumlar.map((o) => hesapKarti(p, o, o.hesap === siradakiAd)),
+        state.hesapFormu === p.ad ? hesapEkleFormu(p) : null,
         falKarti(p)
       ),
-      el('button', {
-        class: 'btn btn-ekle btn-kucuk',
-        text: '+ Hesap ekle',
-        title: 'Bu platforma yeni bir hesap ekle (havuza katılır)',
-        onclick: () => hesapEkle(p.ad),
-      })
+      state.hesapFormu === p.ad
+        ? null
+        : el('button', {
+            class: 'btn btn-ekle btn-kucuk',
+            text: '+ Hesap ekle',
+            title: 'Bu platforma yeni bir hesap ekle (havuza katılır)',
+            onclick: () => {
+              state.hesapFormu = p.ad;
+              state.yeniHesapMotor = 'codex';
+              oturumlariCiz();
+              document.getElementById(`yeniHesapAd-${p.ad}`)?.focus();
+            },
+          })
     );
     kap.append(kart);
   }
@@ -1569,19 +1615,6 @@ async function oturumSina(ad, hesap, dugme) {
   // Sına havuz cezasını da kaldırabilir — kart "limitte" satırından hemen
   // kurtulsun diye tam durum çekilir (oturumlariCiz onun içinde çalışır).
   await durumuTazele();
-}
-
-async function hesapEkle(ad) {
-  const isim = prompt('Yeni hesap adı (örn: onur):');
-  if (!isim || !isim.trim()) return;
-  try {
-    const yanit = await api(`/api/hesap/${ad}`, { method: 'POST', body: { ad: isim.trim() } });
-    const i = state.platformlar.findIndex((x) => x.ad === ad);
-    if (i >= 0) state.platformlar[i] = yanit.platform;
-    oturumlariCiz();
-  } catch (e) {
-    alert(e.message);
-  }
 }
 
 /** Hesabın eşzamanlı üretim sayısını değiştirir (en az 1, anında kaydedilir). */

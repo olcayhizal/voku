@@ -19,7 +19,6 @@
         "model_reasoning_effort": "low"
       },
       "sohbetModu": true,
-      "motor": "codex",
       "sohbetParalel": 2
     },
     "gemini": {
