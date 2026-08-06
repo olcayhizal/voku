@@ -32,6 +32,27 @@ function kaynakAl(profil) {
   return k;
 }
 
+/* ChatGPT eşzamanlı mesaj gönderimini sınırlıyor: hesap (profil) başına
+ * gönderimler arasında en az `webGonderimAraligiMs` (10 sn) bulunur.
+ * Paralel sekmeler üretimi paralel sürdürür — yalnız gönderme anları
+ * sıraya dizilip aralıklandırılır. */
+const tempolar = new Map(); // profil → { son, kuyruk }
+
+function gonderimSirasi(profil, aralikMs) {
+  let t = tempolar.get(profil);
+  if (!t) {
+    t = { son: 0, kuyruk: Promise.resolve() };
+    tempolar.set(profil, t);
+  }
+  const soz = t.kuyruk.then(async () => {
+    const bekleMs = t.son + aralikMs - Date.now();
+    if (bekleMs > 0) await new Promise((r) => setTimeout(r, bekleMs));
+    t.son = Date.now();
+  });
+  t.kuyruk = soz.catch(() => {});
+  return soz;
+}
+
 /** Hesabın (yoksa platformun) web profili. */
 function profilYolu(platform, hesap) {
   return hesap?.profileDir || platform?.profileDir || null;
@@ -113,7 +134,12 @@ export async function uret(_page, girdi) {
         ...ayarlar,
         generationTimeoutMs: Math.max(Number(ayarlar.generationTimeoutMs) || 240000, 360000),
       };
-      const dosyalar = await chatgptWeb.uret(sayfa.page, { ...girdi, ayarlar: webAyar });
+      const aralik = Number(platform.webGonderimAraligiMs) || 10000;
+      const dosyalar = await chatgptWeb.uret(sayfa.page, {
+        ...girdi,
+        ayarlar: webAyar,
+        gonderimKapisi: () => gonderimSirasi(profil, aralik),
+      });
       log.ok(`[chatgpt-tarayici] web kotasından üretildi: ${dosyalar.join(', ')}`);
       return dosyalar;
     } finally {

@@ -236,6 +236,9 @@ function hesaplariNormalize(plt) {
         concurrency: Number(h.concurrency) > 0 ? Number(h.concurrency) : 1,
         aktif,
         motor: 'web',
+        // Web limiti ~3 saatlik kayan pencere: hesaplar dönüşümlü kullanılır
+        // ki pencereler dengeli dolsun (Codex'teki "birini bitir" yerine).
+        rotasyon: true,
         profileDir: mutlak(h.profileDir || path.join('.profiles', `chatgpt-web-${ad}`)),
       };
     }

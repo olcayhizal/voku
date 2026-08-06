@@ -52,7 +52,7 @@ export async function hazirla(page, platform, sel, ayarlar) {
  * Tek prompt için üretim. Yeni sohbet açar → fotoğrafı yükler →
  * promptu gönderir → üretilen görselleri indirir.
  */
-export async function uret(page, { imagePath, prompt, outDir, baseName, sel, ayarlar, signal }) {
+export async function uret(page, { imagePath, prompt, outDir, baseName, sel, ayarlar, signal, gonderimKapisi }) {
   // Her task temiz sohbette çalışsın — önceki bağlam bulaşmasın.
   await page.goto(ayarlar.platforms.chatgpt.url, { waitUntil: 'domcontentloaded' });
   await bekle(2500);
@@ -70,6 +70,11 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
 
   // Üretim öncesi baseline (yüklenen foto baseline'a dahil olsun)
   const baseline = await gorselKumesi(page, gorselSecici(sel));
+
+  // ChatGPT'nin eşzamanlı mesaj/rate limitine takılmamak için gönderimler
+  // arası tempo — paralel sekmeler üretimi paralel sürdürür, yalnız
+  // GÖNDERME anları aralıklı olur (kapıyı çağıran sürücü tutar).
+  if (gonderimKapisi) await gonderimKapisi();
 
   // Gönder
   const gonder = page.locator(sel.sendButton).first();

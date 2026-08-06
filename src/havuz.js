@@ -100,10 +100,24 @@ export function kirala(platformAdi, hesaplar) {
   const asil = hesaplar.filter((h) => !h.yedek);
   for (const h of asil) {
     const d = kiralanabilir(platformAdi, h);
-    if (d) {
-      d.slot += 1;
-      return h;
+    if (!d) continue;
+    // Rotasyonlu hesaplar (web): "birini sonuna kadar kullan" yerine
+    // uygun olanlar arasında en uzun süredir boşta durana ver — kayan
+    // pencere limitleri iki hesapta dengeli dolsun.
+    if (h.rotasyon) {
+      const adaylar = asil
+        .filter((x) => x.rotasyon)
+        .map((x) => ({ hesap: x, d: kiralanabilir(platformAdi, x) }))
+        .filter((a) => a.d)
+        .sort((a, b) => (a.d.sonKullanim || 0) - (b.d.sonKullanim || 0));
+      const secim = adaylar[0];
+      secim.d.slot += 1;
+      secim.d.sonKullanim = Date.now();
+      return secim.hesap;
     }
+    d.slot += 1;
+    d.sonKullanim = Date.now();
+    return h;
   }
   const asilUygunVar = asil.some(
     (h) => h.aktif !== false && !dinlenmedeMi(hesapDurumu(platformAdi, h.ad))
