@@ -25,6 +25,7 @@ export async function yeniGorselleriBekle(page, selector, baseline, {
   stableMs = 6000,
   pollMs = 1500,
   signal,
+  hataKontrol,
 } = {}) {
   const bitis = Date.now() + timeoutMs;
   let sonSayi = 0;
@@ -32,6 +33,12 @@ export async function yeniGorselleriBekle(page, selector, baseline, {
 
   while (Date.now() < bitis) {
     if (signal?.aborted) throw new Error('Durduruldu.');
+    // Sayfa görsel yerine hata/ret mesajı gösteriyorsa timeout'u bekleme —
+    // hata erken raporlanır, task boşuna "üretildi" sayılmaz.
+    if (hataKontrol) {
+      const mesaj = await hataKontrol().catch(() => null);
+      if (mesaj) throw new Error(mesaj);
+    }
     const hepsi = await page.evaluate(
       (sel) =>
         Array.from(document.querySelectorAll(sel))

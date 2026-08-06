@@ -82,22 +82,63 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
   const yeniler = await yeniGorselleriBekle(page, gorselSecici(sel), baseline, {
     timeoutMs: ayarlar.generationTimeoutMs,
     signal,
+    // ChatGPT görsel yerine hata/ret yazdıysa timeout beklenmez.
+    hataKontrol: async () => {
+      const metin = await page
+        .evaluate(() => {
+          const mesajlar = document.querySelectorAll('[data-message-author-role="assistant"]');
+          const son = mesajlar[mesajlar.length - 1];
+          return son ? son.innerText.slice(0, 600) : '';
+        })
+        .catch(() => '');
+      if (
+        /content policy|policy violation|üretemem|oluşturamam|oluşturamıyorum|yardımcı olamam|can.t (create|generate|make)|unable to (create|generate)|something went wrong|bir sorun oluştu|bir hata oluştu/i.test(
+          metin
+        )
+      ) {
+        return `ChatGPT görseli üretemedi/reddetti: ${metin.replace(/\s+/g, ' ').slice(0, 160)}`;
+      }
+      return null;
+    },
   });
+
+  // Yalnız ASİSTAN mesajındaki görseller üretimdir — kullanıcının yüklediği
+  // fotoğraf da sohbette img olarak durur ve geç yüklenirse baseline'ı
+  // kaçırıp "yeni" sanılabilir (orijinal foto "üretildi" diye inerdi).
+  const asistanKumesi = new Set(
+    await page
+      .evaluate(
+        () =>
+          Array.from(
+            document.querySelectorAll(
+              '[data-message-author-role="assistant"] img, main img[alt*="Üretilen"], main img[alt*="Generated"]'
+            )
+          )
+            .filter((img) => img.src)
+            .map((img) => img.src)
+      )
+      .catch(() => [])
+  );
+  const asistanin = yeniler.filter((src) => asistanKumesi.has(src));
 
   // Aynı görsel DOM'da birden çok img'de durur (önizleme + büyütme kopyaları,
   // farklı URL parametreleriyle) — dosya kimliğine göre teke indir.
   const gorulen = new Set();
-  const benzersiz = yeniler.filter((src) => {
+  const benzersiz = asistanin.filter((src) => {
     const kimlik = /[?&]id=([\w-]+)/.exec(src)?.[1] || src;
     if (gorulen.has(kimlik)) return false;
     gorulen.add(kimlik);
     return true;
   });
 
-  // İkinci savunma: URL kimliği farklı olsa da içerik aynıysa (byte bazında)
-  // kopyayı at — panelde aynı kare 6 kez görünmesin.
+  // Son savunmalar: girdi fotoğrafının birebir kopyası "üretim" sayılmaz;
+  // URL kimliği farklı olsa da içerik aynıysa kopya atılır.
+  const girdiOzeti = crypto
+    .createHash('md5')
+    .update(fs.readFileSync(path.resolve(imagePath)))
+    .digest('hex');
   const dosyalar = [];
-  const icerikler = new Set();
+  const icerikler = new Set([girdiOzeti]);
   for (let i = 0; i < benzersiz.length; i++) {
     const ek = benzersiz.length > 1 ? `-${i + 1}` : '';
     const hedef = path.join(outDir, `${baseName}${ek}.png`);
@@ -109,6 +150,10 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
     }
     icerikler.add(ozet);
     dosyalar.push(path.basename(sonuc.yol));
+  }
+
+  if (!dosyalar.length) {
+    throw new Error('ChatGPT yanıtında üretilmiş görsel yok (yalnız yüklenen fotoğraf/eski kareler görüldü).');
   }
   return dosyalar;
 }
