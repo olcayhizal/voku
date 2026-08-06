@@ -1,6 +1,7 @@
 import { contextAc, sayfaAl, bekle } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import * as falAdaptoru from './adapters/fal.js';
+import * as tarayiciYedegi from './adapters/chatgpt-tarayici.js';
 import { jobYaz, manifestYaz, durumuHesapla } from './store.js';
 import { varyantDizini, taskVaryantlariniUret } from './varyant.js';
 import * as havuz from './havuz.js';
@@ -66,8 +67,13 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       continue;
     }
 
-    // Sanal fal hesabı platform sürücüsüyle değil fal API'siyle üretir.
-    const etkinAdaptor = hesap.saglayici === 'fal' ? falAdaptoru : adaptor;
+    // Sanal hesaplar kendi sürücüsüyle üretir: tarayıcı=web kotası, fal=API.
+    const etkinAdaptor =
+      hesap.saglayici === 'fal'
+        ? falAdaptoru
+        : hesap.saglayici === 'tarayici'
+          ? tarayiciYedegi
+          : adaptor;
 
     // 2) Hesap ilk kez kullanılıyorsa hazırla (Codex girişi / köprü servisi).
     if (!hazirlanan.has(hesap.ad)) {
@@ -172,11 +178,18 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
  * failover ile taze hesaba kayar.
  */
 async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, ayarlar, secenekler) {
-  // Havuz = aktif web hesapları + (mod izin veriyorsa) sanal fal hesabı.
+  // Havuz = asıl hesaplar + yedekler. Yedek sırası bilinçli: önce tarayıcı
+  // (Codex kotasından AYRI sayılan ücretsiz web hakkı), sonra fal (ücretli).
   // Pasif hesaplar listede kalır ama kirala/enErkenAcilis onları atlar.
   const webHesaplar = platform.hesaplar || [];
+  const yedekler = [];
+  if ((platform.adapter || platformAdi) === 'chatgpt-codex') {
+    const t = tarayiciYedegi.sanalHesap(platform);
+    if (t) yedekler.push(t);
+  }
   const falHesap = falAdaptoru.sanalHesap(ayarlar, platform);
-  const hesaplar = falHesap ? [...webHesaplar, falHesap] : webHesaplar;
+  if (falHesap) yedekler.push(falHesap);
+  const hesaplar = [...webHesaplar, ...yedekler];
   const kuyruk = tasklar.filter((t) => t.status !== 'done');
 
   if (!hesaplar.some((h) => h.aktif !== false)) {
@@ -199,7 +212,7 @@ async function havuzluKuyruk(job, platformAdi, platform, tasklar, sel, adaptor, 
   const hazirlanan = new Set();
 
   log.info(
-    `[${platformAdi}] ${adaptor.ad} — ${kuyruk.length} task, ${hesaplar.length} hesap${falHesap ? ' (fal dahil)' : ''}, ${isciSayisi} paralel slot`
+    `[${platformAdi}] ${adaptor.ad} — ${kuyruk.length} task, ${hesaplar.length} hesap${yedekler.length ? ` (yedek: ${yedekler.map((y) => y.ad).join('+')})` : ''}, ${isciSayisi} paralel slot`
   );
 
   let sonraki = 0;

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { bekle } from '../browser.js';
 import {
@@ -10,6 +12,16 @@ import {
 } from './common.js';
 
 export const ad = 'chatgpt';
+
+/**
+ * Üretilen görsel selector'ı: settings'teki değere EK olarak güncel arayüz
+ * kalıpları koda gömülü — ChatGPT DOM değiştiğinde (oaiusercontent →
+ * backend-api/estuary geçişi gibi) eski kurulumlardaki settings.json elle
+ * düzeltilmeden çalışmaya devam etsin.
+ */
+const GORSEL_EK =
+  'main img[src*="estuary/content"], main img[alt*="Üretilen görsel"], main img[alt*="Generated image"]';
+const gorselSecici = (sel) => [sel.resultImage, GORSEL_EK].filter(Boolean).join(', ');
 
 /** Sayfa hazır mı (oturum açık, composer görünür mü)? */
 export async function hazirMi(page, sel) {
@@ -57,7 +69,7 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
   await bekle(500);
 
   // Üretim öncesi baseline (yüklenen foto baseline'a dahil olsun)
-  const baseline = await gorselKumesi(page, sel.resultImage);
+  const baseline = await gorselKumesi(page, gorselSecici(sel));
 
   // Gönder
   const gonder = page.locator(sel.sendButton).first();
@@ -67,16 +79,35 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
     await composer.press('Enter');
   }
 
-  const yeniler = await yeniGorselleriBekle(page, sel.resultImage, baseline, {
+  const yeniler = await yeniGorselleriBekle(page, gorselSecici(sel), baseline, {
     timeoutMs: ayarlar.generationTimeoutMs,
     signal,
   });
 
+  // Aynı görsel DOM'da birden çok img'de durur (önizleme + büyütme kopyaları,
+  // farklı URL parametreleriyle) — dosya kimliğine göre teke indir.
+  const gorulen = new Set();
+  const benzersiz = yeniler.filter((src) => {
+    const kimlik = /[?&]id=([\w-]+)/.exec(src)?.[1] || src;
+    if (gorulen.has(kimlik)) return false;
+    gorulen.add(kimlik);
+    return true;
+  });
+
+  // İkinci savunma: URL kimliği farklı olsa da içerik aynıysa (byte bazında)
+  // kopyayı at — panelde aynı kare 6 kez görünmesin.
   const dosyalar = [];
-  for (let i = 0; i < yeniler.length; i++) {
-    const ek = yeniler.length > 1 ? `-${i + 1}` : '';
+  const icerikler = new Set();
+  for (let i = 0; i < benzersiz.length; i++) {
+    const ek = benzersiz.length > 1 ? `-${i + 1}` : '';
     const hedef = path.join(outDir, `${baseName}${ek}.png`);
-    const sonuc = await gorseliIndir(page, yeniler[i], hedef);
+    const sonuc = await gorseliIndir(page, benzersiz[i], hedef);
+    const ozet = crypto.createHash('md5').update(fs.readFileSync(sonuc.yol)).digest('hex');
+    if (icerikler.has(ozet)) {
+      fs.rmSync(sonuc.yol, { force: true });
+      continue;
+    }
+    icerikler.add(ozet);
     dosyalar.push(path.basename(sonuc.yol));
   }
   return dosyalar;

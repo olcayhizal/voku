@@ -65,6 +65,10 @@ function hesapBul(platform, hesapAd) {
   return liste.find((h) => h.ad === hesapAd) || null;
 }
 
+// Girdisi silinmiş eski işlerin önizleme uyarısı her tazelemede tekrar
+// basılmasın — yol başına bir kez logla.
+const onizlemeUyarilari = new Set();
+
 const sseIstemcileri = new Set();
 
 function yayinla(tip, veri) {
@@ -863,7 +867,11 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
           try {
             return dosyaServisEt(res, await onizlemeYolu(job, bolumler[0], bolumler[1], boy));
           } catch (e) {
-            log.warn(`Önizleme üretilemedi (${job.id}/${bolumler.join('/')}): ${e.message}`);
+            const anahtar = `${job.id}/${bolumler.join('/')}`;
+            if (!onizlemeUyarilari.has(anahtar)) {
+              onizlemeUyarilari.add(anahtar);
+              log.warn(`Önizleme üretilemedi (${anahtar}): ${e.message} — bu dosya için tekrar uyarılmayacak`);
+            }
           }
         }
         // 'kok' sanal bir varyant (job klasörünün kendisi) — ham yola çevrilir.
@@ -979,6 +987,11 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     clearInterval(falSayaci);
     if (durum.telegram) durum.telegram.durdur();
     // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
+    try {
+      await adaptorAl('chatgpt-tarayici').kapat?.();
+    } catch {
+      /* tarayıcı yedeği hiç açılmadıysa sorun değil */
+    }
     try {
       adaptorAl('gemini-http').koprulariDurdur?.();
     } catch {
