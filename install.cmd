@@ -107,6 +107,12 @@ if errorlevel 1 (
 )
 
 rem ------------------------------------------------- 5. Yapilandirma + kisayol
+echo         Tarayici motoru ^(Chromium^) indiriliyor...
+call npx playwright install chromium >> logs\kurulum.log 2>&1
+if errorlevel 1 (
+  echo         Chromium indirilemedi - tarayici girisleri ilk kullanimda kurulmayi ister.
+)
+
 echo   [5/7] Yapilandirma hazirlaniyor...
 if not exist config\settings.json (
   if exist config\settings.example.json copy /y config\settings.example.json config\settings.json >nul

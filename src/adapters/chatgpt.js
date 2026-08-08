@@ -37,7 +37,19 @@ export async function hazirMi(page, sel) {
 export async function hazirla(page, platform, sel, ayarlar) {
   await page.goto(platform.url, { waitUntil: 'domcontentloaded' });
   await bekle(3500);
-  if (await hazirMi(page, sel)) return;
+  if (await hazirMi(page, sel)) {
+    // Misafir modda da composer görünür — oturumsuz üretim sessizce kötü
+    // sonuç verir. Giriş düğmesi görünüyorsa kesin misafir: net hata.
+    const misafir = await page
+      .locator('button:has-text("Oturum aç"), a:has-text("Oturum aç"), button:has-text("Log in"), a:has-text("Log in")')
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (misafir) {
+      throw new Error('ChatGPT oturumu kapalı (misafir görünüm) — bu hesap için panelden yeniden giriş yapın.');
+    }
+    return;
+  }
 
   if (await botKontroluMu(page)) {
     throw new Error(
@@ -57,13 +69,18 @@ export async function hazirla(page, platform, sel, ayarlar) {
  */
 async function modeliSec(page, istenen) {
   try {
+    // Hız/model seçici buton metni dile ve seçime göre değişir (TR/EN).
+    const hizAdlari = ['Hızlı', 'Orta', 'Otomatik', 'Uzun', 'Fast', 'Medium', 'Auto', 'Thinking', 'Extended', 'Pro'];
     const secici = page
-      .locator('form button:has-text("Hızlı"), form button:has-text("Orta"), form button:has-text("Otomatik"), form button:has-text("Pro"), form button:has-text("Uzun")')
+      .locator(hizAdlari.map((a) => `form button:has-text("${a}")`).join(', '))
       .first();
     if (!(await secici.count())) throw new Error('hız/model seçici bulunamadı');
     await secici.click();
     await bekle(700);
-    await page.locator('[role="menuitem"]:has-text("Gelişmiş")').first().click({ timeout: 5000 });
+    await page
+      .locator('[role="menuitem"]:has-text("Gelişmiş"), [role="menuitem"]:has-text("Advanced")')
+      .first()
+      .click({ timeout: 5000 });
     await bekle(600);
     const modelSatiri = page.locator('[role="menuitem"]:has-text("Model")').first();
     const mevcut = (await modelSatiri.innerText().catch(() => '')).replace(/\n/g, ' ');
@@ -91,7 +108,7 @@ async function modeliSec(page, istenen) {
  */
 export async function uret(page, { imagePath, prompt, outDir, baseName, sel, ayarlar, signal, gonderimKapisi, platform }) {
   // Her task temiz sohbette çalışsın — önceki bağlam bulaşmasın.
-  await page.goto(ayarlar.platforms.chatgpt.url, { waitUntil: 'domcontentloaded' });
+  await page.goto(platform?.url || ayarlar.platforms.chatgpt.url, { waitUntil: 'domcontentloaded' });
   await bekle(2500);
 
   const composer = await ilkGorunen(page, sel.composer, 30000);
