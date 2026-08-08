@@ -477,6 +477,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       prompt,
       '',
       `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
+      'O yola kaydedemezsen sorun değil — her durumda bittiğinde görselin ŞU AN bulunduğu tam (mutlak) yolu tek satırda şu biçimde yaz: CIKTI: <yol>',
     ].join('\n');
     // `--json`: oturum kimliği event akışından okunur. `--ephemeral` YOK —
     // oturum diske yazılmalı ki sonraki işler devam ettirebilsin. Sohbet
@@ -535,9 +536,9 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     kayit.tur += 1; // başarısız tur da sohbet geçmişine yazıldı
     log.warn(`[chatgpt-codex] çıktı bulunamadı — kurtarma turu: sohbetteki son görsel hedefe kopyalatılıyor (${baseName})`);
     const kurtarmaGorev = [
-      `Bu sohbette az önce ürettiğin SON görseli tam olarak şu yola kopyala: ${hedef}`,
-      'YENİ GÖRSEL ÜRETME — yalnız var olan dosyayı kopyala.',
-      'Kopyaladıktan sonra dosyanın tam yolunu tek satır olarak yaz.',
+      'YENİ GÖRSEL ÜRETME. Bu sohbette az önce ürettiğin SON görselin dosyası nerede duruyorsa,',
+      'o dosyanın tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
+      `Mümkünse ayrıca dosyayı şu yola da kopyalamayı dene (izin yoksa atla): ${hedef}`,
     ].join('\n');
     const kurtarmaHam = await codexCalistir(
       ['exec', 'resume', kayit.id, '--skip-git-repo-check', '--json', ...ortakArgumanlar, '-'],
@@ -663,9 +664,48 @@ function jsonlDosyaYollari(ham, outDir) {
   return yollar;
 }
 
+/**
+ * Agent'ın bildirdiği çıktı yolları: görev metni "CIKTI: <tam yol>" satırı
+ * ister. Sandbox agent'ın hedefe KOPYALAMASINA izin vermese bile yolu
+ * YAZMASINA engel yok — kopyayı sandbox'sız çalışan biz yaparız. Her sohbet
+ * yalnız kendi dosyasını bildirdiği için paralel üretimde eşleşme kesindir.
+ */
+function bildirilenYollar(ham, outDir) {
+  const metinler = [];
+  let jsonlVar = false;
+  for (const satir of String(ham || '').split('\n')) {
+    const t = satir.trim();
+    if (!t.startsWith('{')) continue;
+    try {
+      const o = JSON.parse(t);
+      jsonlVar = true;
+      const it = o.item || o;
+      if (it.type === 'agent_message' && it.text) metinler.push(it.text);
+    } catch {
+      /* JSON olmayan satır */
+    }
+  }
+  if (!jsonlVar) metinler.push(String(ham || '')); // düz metin çıktı modu
+  const yollar = [];
+  const kalip = /CIKTI:\s*"?([^\n"']+\.(?:png|jpe?g|webp))"?/gi;
+  for (const metin of metinler) {
+    for (const es of metin.matchAll(kalip)) {
+      const y = es[1].trim();
+      yollar.push(path.isAbsolute(y) ? y : path.resolve(outDir, y));
+    }
+  }
+  return yollar;
+}
+
 /** Codex çıktısından üretilen dosyaları bulur, gerekirse iş klasörüne taşır. */
-function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
+export function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
   const yollar = new Set();
+
+  // 0a) Agent'ın "CIKTI:" satırıyla bildirdiği yollar — sohbet kendi
+  // dosyasını bildirir, paralel üretimde en kesin eşleşme.
+  for (const y of bildirilenYollar(ham, outDir)) {
+    if (fs.existsSync(y) && !oncesi.has(path.basename(y))) yollar.add(y);
+  }
 
   // 0) --json akışının file_change kayıtları: bu turda yazılan dosyaların
   // KESİN yolları — varsa tahmine (yol 2/3) hiç gerek kalmaz.
