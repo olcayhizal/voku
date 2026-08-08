@@ -287,6 +287,15 @@ function codexCiktilari(baslangicZamani, hesap) {
  */
 const sohbetler = new Map(); // "hesap::promptId::promptOzeti" → [{ id, tur, aktif, kuyruk }]
 
+// Hesap (CODEX_HOME) başına süren üretim sayısı: generated_images yedek
+// yolunun paralel üretim sırasında BAŞKA task'ın görselini kapmaması için
+// (kare 01'e kare 04'ün görselinin yazılması bu yüzdendi).
+const aktifUretimler = new Map(); // codexHome → sayı
+
+function uretimSayaci(home, fark) {
+  aktifUretimler.set(home, Math.max(0, (aktifUretimler.get(home) || 0) + fark));
+}
+
 /**
  * Aynı prompt'un işleri paralel gelebilsin diye prompt başına birden çok
  * sohbet tutulur (`sohbetParalel`, varsayılan 2): boşta sohbet varsa o,
@@ -384,6 +393,17 @@ export function oturumKimligiCoz(ham) {
 }
 
 export async function uret(_page, girdi) {
+  const { platform, hesap, promptId, prompt } = girdi;
+  const home = codexKoku(hesap);
+  uretimSayaci(home, +1);
+  try {
+    return await uretIc(girdi);
+  } finally {
+    uretimSayaci(home, -1);
+  }
+}
+
+async function uretIc(girdi) {
   const { platform, hesap, promptId, prompt } = girdi;
   if (platform?.sohbetModu === false) return tekSeferlikUret(girdi);
 
@@ -617,6 +637,14 @@ function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
   // yazar — "bu turda oluşan her görsel benimdir" demek başka task'ın
   // çıktısını da sahiplenip Telegram'a kopya olarak taşıyordu.
   if (!yollar.size) {
+    // Aynı hesapta BAŞKA üretim de sürüyorsa ortak klasördeki "en yeni"
+    // görsel pekala onunki olabilir — almak yanlış eşleşme (kare 01'e kare
+    // 04'ün görseli) üretir. Belirsizlikte alma: hata → normal retry.
+    if ((aktifUretimler.get(codexKoku(hesap)) || 0) > 1) {
+      throw new Error(
+        'Codex çıktıyı hedef klasöre yazmadı; aynı hesapta paralel üretim sürerken ortak çıktı klasöründen almak yanlış eşleşme riski taşır — yeniden denenecek.'
+      );
+    }
     const kalanlar = codexCiktilari(baslangic, hesap).slice(-1);
     for (const kaynak of kalanlar) {
       const varis = path.join(outDir, `${baseName}${path.extname(kaynak) || '.png'}`);
