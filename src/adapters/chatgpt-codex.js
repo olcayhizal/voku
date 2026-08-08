@@ -457,7 +457,10 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
   // İÇİNDEN ağa atıyor. workspace-write varsayılanı ağı kapattığı için izin
   // açılmazsa "yetkilendirme hatası" ile sessizce üretmiyor.
   const ortakArgumanlar = ['-c', 'sandbox_workspace_write.network_access=true'];
-  if (platform?.model) ortakArgumanlar.push('-m', platform.model);
+  // Varsayılan model gpt-5.5 (CLI varsayılanı 5.6-sol) — settings'te
+  // platform.model ile değiştirilebilir. Görseli image_gen ürettiği için
+  // kalite aynı; yöneten ajan 5.5.
+  ortakArgumanlar.push('-m', platform?.model || 'gpt-5.5');
   for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
     ortakArgumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
   }
@@ -556,7 +559,7 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     path.resolve(imagePath),
   ];
 
-  if (platform?.model) argumanlar.push('-m', platform.model);
+  argumanlar.push('-m', platform?.model || 'gpt-5.5');
   for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
     argumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
   }
