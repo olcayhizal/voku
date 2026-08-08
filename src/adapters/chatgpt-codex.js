@@ -482,8 +482,8 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'İSTENEN GÖRSEL:',
       prompt,
       '',
-      `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
-      'O yola kaydedemezsen sorun değil — her durumda bittiğinde görselin ŞU AN bulunduğu tam (mutlak) yolu tek satırda şu biçimde yaz: CIKTI: <yol>',
+      'Üretilen dosyayı TAŞIMA, KOPYALAMA, yeniden adlandırma — dosya işleri bizde.',
+      'Üretim bitince görsel dosyasının tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
     ].join('\n');
     // `--json`: oturum kimliği event akışından okunur. `--ephemeral` YOK —
     // oturum diske yazılmalı ki sonraki işler devam ettirebilsin. Sohbet
@@ -515,7 +515,8 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'İSTENEN GÖRSEL:',
       prompt,
       '',
-      `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
+      'Üretilen dosyayı TAŞIMA, KOPYALAMA, yeniden adlandırma — dosya işleri bizde.',
+      'Üretim bitince görsel dosyasının tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
     ].join('\n');
     // --json: file_change event'leri üretilen dosyanın KESİN yolunu verir —
     // ortak klasör tahminine (yanlış eşleşme riski) gerek kalmaz.
