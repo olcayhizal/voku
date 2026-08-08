@@ -523,7 +523,28 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(0, 8)}… → ${baseName}`);
   }
 
-  const dosyalar = dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+  let dosyalar;
+  try {
+    dosyalar = dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+  } catch (e) {
+    if (!kayit.id || e.limitDolu || signal?.aborted) throw e;
+    // Üretim büyük olasılıkla TAMAM ama dosya izlenemedi (Windows'ta Codex
+    // hedefe kopyalayamayabiliyor; ortak klasör paralelde güvensiz). Yeniden
+    // üretim görsel kotası yakar — bunun yerine sohbete ucuz bir kurtarma
+    // turu: sohbet kendi görselini bilir, hedefe KOPYALATILIR.
+    kayit.tur += 1; // başarısız tur da sohbet geçmişine yazıldı
+    log.warn(`[chatgpt-codex] çıktı bulunamadı — kurtarma turu: sohbetteki son görsel hedefe kopyalatılıyor (${baseName})`);
+    const kurtarmaGorev = [
+      `Bu sohbette az önce ürettiğin SON görseli tam olarak şu yola kopyala: ${hedef}`,
+      'YENİ GÖRSEL ÜRETME — yalnız var olan dosyayı kopyala.',
+      'Kopyaladıktan sonra dosyanın tam yolunu tek satır olarak yaz.',
+    ].join('\n');
+    const kurtarmaHam = await codexCalistir(
+      ['exec', 'resume', kayit.id, '--skip-git-repo-check', '--json', ...ortakArgumanlar, '-'],
+      { timeoutMs: 120000, cwd: outDir, signal, stdin: kurtarmaGorev, codexHome }
+    );
+    dosyalar = dosyalariTopla(kurtarmaHam, { outDir, baseName, oncesi, baslangic, hesap });
+  }
   kayit.tur += 1;
   return dosyalar;
 }
