@@ -457,7 +457,13 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
   // Yeni Codex sürümlerinde image_gen bir skill: üretim isteğini sandbox
   // İÇİNDEN ağa atıyor. workspace-write varsayılanı ağı kapattığı için izin
   // açılmazsa "yetkilendirme hatası" ile sessizce üretmiyor.
-  const ortakArgumanlar = ['-c', 'sandbox_workspace_write.network_access=true'];
+  // Çıktı kökü sandbox'ın yazılabilir köklerine eklenir — Windows sandbox'ı
+  // cwd iznine rağmen kullanıcı dizinine yazdırmayabiliyor; bu ayar
+  // destekleniyorsa kopyalama ajan tarafında da düzelir (CIKTI yolu yedek).
+  const ortakArgumanlar = [
+    '-c', 'sandbox_workspace_write.network_access=true',
+    '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([OUTPUT_DIR])}`,
+  ];
   // Varsayılan model gpt-5.5 (CLI varsayılanı 5.6-sol) — settings'te
   // platform.model ile değiştirilebilir. Görseli image_gen ürettiği için
   // kalite aynı; yöneten ajan 5.5.
@@ -580,6 +586,8 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     // imagegen skill'i üretim isteğini sandbox içinden ağa atıyor (yeni Codex).
     '-c',
     'sandbox_workspace_write.network_access=true',
+    '-c',
+    `sandbox_workspace_write.writable_roots=${JSON.stringify([OUTPUT_DIR])}`,
     '-i',
     path.resolve(imagePath),
   ];
