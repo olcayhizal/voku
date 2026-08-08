@@ -13,7 +13,7 @@ const VARSAYILAN = {
   platforms: {},
   selectors: {},
   // fal.ai yedek üretim: anahtar panelden girilir, settings.json'da saklanır.
-  fal: { apiKey: null, concurrency: 4 },
+  fal: { apiKey: null, concurrency: 8 },
 };
 
 // Platform başına varsayılan fal modeli. Gemini'de Nano Banana 2

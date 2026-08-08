@@ -132,7 +132,7 @@ export async function uret(_page, girdi) {
       // zaman aşımı gereksiz "üretmedi" sayar.
       const webAyar = {
         ...ayarlar,
-        generationTimeoutMs: Math.max(Number(ayarlar.generationTimeoutMs) || 240000, 360000),
+        generationTimeoutMs: Math.max(Number(ayarlar.generationTimeoutMs) || 240000, 600000),
       };
       const aralik = Number(platform.webGonderimAraligiMs) || 10000;
       const dosyalar = await chatgptWeb.uret(sayfa.page, {

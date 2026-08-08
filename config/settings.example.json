@@ -50,6 +50,6 @@
   "_": "Bu sablondan config/settings.json olusturulur (install/ilk acilista kopyalanir). Hesaplari panelden Oturumlar > + Hesap ekle ile eklersin; gercek settings.json git-disidir.",
   "fal": {
     "apiKey": null,
-    "concurrency": 4
+    "concurrency": 8
   }
 }

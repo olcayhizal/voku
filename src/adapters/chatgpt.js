@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bekle } from '../browser.js';
+import { log } from '../logger.js';
 import {
   gorselKumesi,
   yeniGorselleriBekle,
@@ -49,15 +50,56 @@ export async function hazirla(page, platform, sel, ayarlar) {
 }
 
 /**
+ * Composer'daki model seçiciden istenen modeli seçer (varsayılan GPT-5.5 —
+ * web görsel üretimi 5.6'da Codex'le ortak sayaca yazıyor, 5.5 ayrı).
+ * Yol: hız seçici → Gelişmiş → Model → <model>. Menü DOM'u değişirse üretimi
+ * durdurmaz, uyarı loglar (best-effort).
+ */
+async function modeliSec(page, istenen) {
+  try {
+    const secici = page
+      .locator('form button:has-text("Hızlı"), form button:has-text("Orta"), form button:has-text("Otomatik"), form button:has-text("Pro"), form button:has-text("Uzun")')
+      .first();
+    if (!(await secici.count())) throw new Error('hız/model seçici bulunamadı');
+    await secici.click();
+    await bekle(700);
+    await page.locator('[role="menuitem"]:has-text("Gelişmiş")').first().click({ timeout: 5000 });
+    await bekle(600);
+    const modelSatiri = page.locator('[role="menuitem"]:has-text("Model")').first();
+    const mevcut = (await modelSatiri.innerText().catch(() => '')).replace(/\n/g, ' ');
+    // Seçiliyken satır "GPT-5.5" değil "5.5" gösterebiliyor — ikisini de tanı.
+    if (mevcut.includes(istenen) || mevcut.includes(istenen.replace(/^GPT-/, ''))) {
+      await page.keyboard.press('Escape');
+      return true;
+    }
+    await modelSatiri.click({ timeout: 5000 });
+    await bekle(700);
+    await page.locator(`[role="menuitemradio"]:has-text("${istenen}")`).first().click({ timeout: 5000 });
+    await bekle(400);
+    await page.keyboard.press('Escape').catch(() => {});
+    return true;
+  } catch (e) {
+    log.warn(`[chatgpt] model "${istenen}" seçilemedi (${String(e.message).slice(0, 80)}) — mevcut modelle devam`);
+    await page.keyboard.press('Escape').catch(() => {});
+    return false;
+  }
+}
+
+/**
  * Tek prompt için üretim. Yeni sohbet açar → fotoğrafı yükler →
  * promptu gönderir → üretilen görselleri indirir.
  */
-export async function uret(page, { imagePath, prompt, outDir, baseName, sel, ayarlar, signal, gonderimKapisi }) {
+export async function uret(page, { imagePath, prompt, outDir, baseName, sel, ayarlar, signal, gonderimKapisi, platform }) {
   // Her task temiz sohbette çalışsın — önceki bağlam bulaşmasın.
   await page.goto(ayarlar.platforms.chatgpt.url, { waitUntil: 'domcontentloaded' });
   await bekle(2500);
 
   const composer = await ilkGorunen(page, sel.composer, 30000);
+
+  // Model: web görsel limiti modele göre ayrı sayılıyor — 5.5 zorunlu
+  // (webModeli:null seçim atlatır).
+  const istenenModel = platform?.webModeli === undefined ? 'GPT-5.5' : platform.webModeli;
+  if (istenenModel) await modeliSec(page, istenenModel);
 
   // Fotoğrafı yükle
   const fileInput = page.locator(sel.fileInput).first();
@@ -129,12 +171,19 @@ export async function uret(page, { imagePath, prompt, outDir, baseName, sel, aya
   // Aynı görsel DOM'da birden çok img'de durur (önizleme + büyütme kopyaları,
   // farklı URL parametreleriyle) — dosya kimliğine göre teke indir.
   const gorulen = new Set();
-  const benzersiz = asistanin.filter((src) => {
+  const kimlikliler = asistanin.filter((src) => {
     const kimlik = /[?&]id=([\w-]+)/.exec(src)?.[1] || src;
     if (gorulen.has(kimlik)) return false;
     gorulen.add(kimlik);
     return true;
   });
+  // Web'de bir istek TEK görsel üretir: birden çok aday varsa (önceki
+  // denemenin artığı, geç yüklenen eski kare) yalnız EN YENİSİ (DOM'da en
+  // alttaki) alınır — task'a çoklu dosya sızıp Telegram'da kopya yaratmasın.
+  const benzersiz = kimlikliler.slice(-1);
+  if (kimlikliler.length > 1) {
+    log.warn(`[chatgpt] ${kimlikliler.length} aday görselden yalnız en yenisi alındı (${baseName})`);
+  }
 
   // Son savunmalar: girdi fotoğrafının birebir kopyası "üretim" sayılmaz;
   // URL kimliği farklı olsa da içerik aynıysa kopya atılır.
