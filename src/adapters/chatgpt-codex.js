@@ -433,9 +433,10 @@ async function sohbetteUret(girdi, kayit) {
     try {
       return await turCalistir(girdi, kayit, false);
     } catch (e) {
-      // Limit/durdurma yukarı çıkar (failover/abort oradan yönetiliyor);
-      // diğer hatalarda oturum çürümüş olabilir — yeni sohbetle bir şans daha.
-      if (e.limitDolu || girdi.signal?.aborted) throw e;
+      // Limit/durdurma/dosya-toplama hataları yukarı çıkar (failover/abort/
+      // retry oradan yönetiliyor); diğer hatalarda oturum çürümüş olabilir —
+      // yeni sohbetle bir şans daha.
+      if (e.limitDolu || girdi.signal?.aborted || e.sohbetiKoru) throw e;
       log.warn(`[chatgpt-codex] sohbet sürdürülemedi (${String(e.message).slice(0, 120)}) — yeni sohbet açılıyor`);
       kayit.id = null;
       kayit.tur = 0;
@@ -509,9 +510,11 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       '',
       `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
     ].join('\n');
+    // --json: file_change event'leri üretilen dosyanın KESİN yolunu verir —
+    // ortak klasör tahminine (yanlış eşleşme riski) gerek kalmaz.
     ham = await codexCalistir(
       [
-        'exec', 'resume', kayit.id, '--skip-git-repo-check',
+        'exec', 'resume', kayit.id, '--skip-git-repo-check', '--json',
         '-i', path.resolve(imagePath),
         ...ortakArgumanlar, '-',
       ],
@@ -611,10 +614,45 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
   return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
 }
 
+/**
+ * `--json` akışındaki file_change event'lerinden bu TURDA yazılan görsel
+ * dosyalarının kesin yollarını çıkarır — paralel üretimde tek güvenilir
+ * eşleştirme kaynağı (agent hangi dosyayı yazdıysa event'i onu söyler).
+ */
+function jsonlDosyaYollari(ham, outDir) {
+  const yollar = [];
+  for (const satir of String(ham || '').split('\n')) {
+    const t = satir.trim();
+    if (!t.startsWith('{')) continue;
+    let o;
+    try {
+      o = JSON.parse(t);
+    } catch {
+      continue;
+    }
+    const it = o.item || o;
+    if (it.type !== 'file_change') continue;
+    for (const c of it.changes || []) {
+      const ham_yol = c.path || '';
+      if (!/\.(png|jpe?g|webp)$/i.test(ham_yol)) continue;
+      const tam = path.isAbsolute(ham_yol) ? ham_yol : path.resolve(outDir, ham_yol);
+      yollar.push(tam);
+    }
+  }
+  return yollar;
+}
+
 /** Codex çıktısından üretilen dosyaları bulur, gerekirse iş klasörüne taşır. */
 function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
-  // 1) Şemalı cevaptaki yollar — üretimden önce de var olan dosyaları alma.
   const yollar = new Set();
+
+  // 0) --json akışının file_change kayıtları: bu turda yazılan dosyaların
+  // KESİN yolları — varsa tahmine (yol 2/3) hiç gerek kalmaz.
+  for (const y of jsonlDosyaYollari(ham, outDir)) {
+    if (fs.existsSync(y) && !oncesi.has(path.basename(y))) yollar.add(y);
+  }
+
+  // 1) Şemalı cevaptaki yollar — üretimden önce de var olan dosyaları alma.
   const eslesme = ham.match(/\{[\s\S]*"files"[\s\S]*\}/);
   if (eslesme) {
     try {
@@ -644,9 +682,11 @@ function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
     // görsel pekala onunki olabilir — almak yanlış eşleşme (kare 01'e kare
     // 04'ün görseli) üretir. Belirsizlikte alma: hata → normal retry.
     if ((aktifUretimler.get(codexKoku(hesap)) || 0) > 1) {
-      throw new Error(
-        'Codex çıktıyı hedef klasöre yazmadı; aynı hesapta paralel üretim sürerken ortak çıktı klasöründen almak yanlış eşleşme riski taşır — yeniden denenecek.'
+      const e = new Error(
+        'Codex çıktısı bulunamadı (paralel üretim sürerken ortak klasörden alınmaz) — yeniden denenecek.'
       );
+      e.sohbetiKoru = true; // sohbet çürümedi; dosya toplama sorunu
+      throw e;
     }
     const kalanlar = codexCiktilari(baslangic, hesap).slice(-1);
     for (const kaynak of kalanlar) {
