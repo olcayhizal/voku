@@ -604,25 +604,35 @@ function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
     }
   }
 
-  // 2) Çıktı klasöründe beliren yeni dosyalar — SADECE kendi baseName'imiz.
-  // Aynı job'ın başka task'ları (ör. paralel koşan Gemini) aynı klasöre yazar;
-  // "yeni olan her dosya benimdir" demek başkasının çıktısını sahiplenir.
+  // 2) Çıktı klasöründe beliren yeni dosyalar — SADECE kendi baseName'imiz,
+  // sıkı kalıpla (tam ad veya -N eki). Gevşek startsWith, Codex'in yazdığı
+  // türev/ara dosyaları da sahiplenip task'a çoklu dosya sızdırıyordu.
+  const adKalibi = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(-\\d+)?\\.(png|jpe?g|webp)$`, 'i');
   for (const dosya of gorselDosyalari(outDir)) {
-    if (!oncesi.has(dosya) && dosya.startsWith(baseName)) yollar.add(path.join(outDir, dosya));
+    if (!oncesi.has(dosya) && adKalibi.test(dosya)) yollar.add(path.join(outDir, dosya));
   }
 
-  // 3) Codex kendi klasörüne bırakıp kopyalamadıysa oradan al
+  // 3) Codex kendi klasörüne bırakıp kopyalamadıysa oradan YALNIZ EN YENİSİNİ
+  // al: sohbet modunda aynı hesabın paralel sohbetleri de generated_images'a
+  // yazar — "bu turda oluşan her görsel benimdir" demek başka task'ın
+  // çıktısını da sahiplenip Telegram'a kopya olarak taşıyordu.
   if (!yollar.size) {
-    const kalanlar = codexCiktilari(baslangic, hesap);
-    kalanlar.forEach((kaynak, i) => {
-      const ek = kalanlar.length > 1 ? `-${i + 1}` : '';
-      const varis = path.join(outDir, `${baseName}${ek}${path.extname(kaynak) || '.png'}`);
+    const kalanlar = codexCiktilari(baslangic, hesap).slice(-1);
+    for (const kaynak of kalanlar) {
+      const varis = path.join(outDir, `${baseName}${path.extname(kaynak) || '.png'}`);
       fs.copyFileSync(kaynak, varis);
       yollar.add(varis);
-    });
+    }
   }
 
-  const gecerli = [...yollar].filter((y) => fs.existsSync(y) && fs.statSync(y).size > 1024);
+  let gecerli = [...yollar].filter((y) => fs.existsSync(y) && fs.statSync(y).size > 1024);
+  // Codex bir turda TEK görsel üretir: birden çok aday kaldıysa (agent'ın
+  // ara/türev kayıtları) yalnız ilki (en güvenilir kaynak sırası: şemalı
+  // cevap → hedef yol) task'a yazılır — çoklu dosya Telegram'da kopya olur.
+  if (gecerli.length > 1) {
+    log.warn(`[chatgpt-codex] ${gecerli.length} aday çıktıdan yalnız ilki alındı (${baseName})`);
+    gecerli = gecerli.slice(0, 1);
+  }
   if (!gecerli.length) {
     // Görsel servisi erişimi reddettiyse (403 / yetkilendirme) bu hesap şu an
     // üretemiyor demektir — genelde görsel kotası dolmuştur ama Codex bunu
