@@ -33,15 +33,19 @@ export function tunelAyarlari() {
   };
 }
 
-/** Cloudflare named tunnel bilgilerini kaydeder (token + sabit adres). */
+/**
+ * Cloudflare named tunnel bilgilerini kaydeder. Connector Windows servisi
+ * olarak kuruluysa token'a gerek yok — yalnız sabit adres yeter (VOKU
+ * tüneli kendisi başlatacaksa token da verilir).
+ */
 export function cloudflareKaydet(token, hostname) {
   const t = String(token || '').trim();
   const h = String(hostname || '')
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '')
     .trim();
-  if (!t || !h) throw new Error('Token ve sabit adres (hostname) birlikte gerekli.');
-  return yaz({ ...tunelAyarlari(), cfToken: t, cfHostname: h });
+  if (!h) throw new Error('Sabit adres (hostname) gerekli.');
+  return yaz({ ...tunelAyarlari(), ...(t ? { cfToken: t } : {}), cfHostname: h });
 }
 
 function yaz(s) {
@@ -75,30 +79,36 @@ export async function disErisimDurumu() {
   if (Date.now() - onbellek.at < 5000) return onbellek.veri;
   let veri = { acik: false, adres: null };
 
-  // 1) cloudflared (metrics 4041): quick tunnel adresi ya da named tunnel
-  // hazır sinyali. ngrok'un aksine bant/istek sınırı yok.
-  try {
-    const y = await fetch('http://127.0.0.1:4041/quicktunnel', {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (y.ok) {
-      const j = await y.json().catch(() => ({}));
-      if (j.hostname) veri = { acik: true, adres: `https://${j.hostname}` };
+  // 1) cloudflared named tunnel: en sağlam tespit sabit adresin KENDİSİ —
+  // connector Windows servisi olarak da koşabilir (metrics portu bizde
+  // olmaz). Cloudflare, tünel kapalıysa 530 (error 1033) döndürür; onun
+  // dışındaki her HTTP yanıtı "dışarıdan erişilebilir" demektir.
+  const ayar = tunelAyarlari();
+  if (ayar.cfHostname) {
+    try {
+      const y = await fetch(`https://${ayar.cfHostname}/`, {
+        method: 'HEAD',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(3000),
+      });
+      if (y.status !== 530) {
+        veri = { acik: true, adres: `https://${ayar.cfHostname}` };
+      }
+    } catch {
+      /* DNS yok / ağ yok — kapalı say, metrics'e bak */
     }
-  } catch {
-    /* cloudflared kapalı ya da quick modda değil */
   }
+  // VOKU'nun kendi başlattığı cloudflared (metrics 4041) — servis değilse.
   if (!veri.acik) {
     try {
       const y = await fetch('http://127.0.0.1:4041/ready', {
         signal: AbortSignal.timeout(1500),
       });
-      if (y.ok) {
-        const s = tunelAyarlari();
-        if (s.cfHostname) veri = { acik: true, adres: `https://${s.cfHostname}` };
+      if (y.ok && ayar.cfHostname) {
+        veri = { acik: true, adres: `https://${ayar.cfHostname}` };
       }
     } catch {
-      /* named tunnel da yok — ngrok'a bak */
+      /* cloudflared yok — ngrok'a bak */
     }
   }
   if (veri.acik) {

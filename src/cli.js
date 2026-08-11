@@ -450,6 +450,12 @@ async function main() {
         log.ok(`Cloudflare tüneli kaydedildi: ${s.cfHostname}`);
         return;
       }
+      if (opsiyon['cf-host-kaydet'] && opsiyon['cf-host-kaydet'] !== true) {
+        // Connector servis olarak kuruluysa token gerekmez — yalnız adres.
+        const s = t.cloudflareKaydet(null, opsiyon['cf-host-kaydet']);
+        log.ok(`Cloudflare sabit adresi kaydedildi: ${s.cfHostname}`);
+        return;
+      }
       if (opsiyon['cf-token']) {
         console.log(t.tunelAyarlari().cfToken || '');
         return;

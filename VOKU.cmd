@@ -223,15 +223,15 @@ call node src\cli.js tunel --kaydet "!ADRES!" >nul 2>&1
 exit /b 0
 
 :cf_adres
+rem Sabit adres tanimli + cloudflared kosuyorsa (VOKU ya da Windows servisi)
+rem tunel hazir sayilir; metrics portu servise gore degisebildigi icin
+rem olcut surec + kayitli adres.
 set "ADRES="
-for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4041/quicktunnel 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.hostname?'https://'+j.hostname:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
-if not "!ADRES!"=="" exit /b 0
-curl -sf --max-time 2 http://127.0.0.1:4041/ready >nul 2>&1
-if not errorlevel 1 (
-  for /f "delims=" %%H in ('node src\cli.js tunel --cf-host 2^>nul') do (
-    if not "%%H"=="" set "ADRES=https://%%H"
-  )
-)
+set "CFHOST="
+for /f "delims=" %%H in ('node src\cli.js tunel --cf-host 2^>nul') do set "CFHOST=%%H"
+if "!CFHOST!"=="" exit /b 0
+tasklist /fi "imagename eq cloudflared.exe" 2>nul | find /i "cloudflared.exe" >nul
+if not errorlevel 1 set "ADRES=https://!CFHOST!"
 exit /b 0
 
 :cf_adres_bekle

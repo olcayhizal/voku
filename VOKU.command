@@ -46,13 +46,11 @@ tunel_pid()  { pgrep -f "cloudflared tunnel" 2>/dev/null | head -1 || pgrep -f "
 tunel_kapat() { pkill -f "cloudflared tunnel" 2>/dev/null; pkill -f "ngrok http $PORT" 2>/dev/null; }
 
 tunel_adresi() {
-  # cloudflared quick tunnel (bant sınırsız) → named tunnel sabit adres → ngrok
+  # cloudflared: sabit adres tanımlı + süreç koşuyorsa hazır → yoksa ngrok
   local h
-  h="$(curl -sf --max-time 2 http://127.0.0.1:4041/quicktunnel 2>/dev/null | sed -n 's/.*"hostname":"\([^"]*\)".*/\1/p')"
-  if [ -n "$h" ]; then printf 'https://%s' "$h"; return 0; fi
-  if curl -sf --max-time 2 http://127.0.0.1:4041/ready >/dev/null 2>&1; then
-    h="$(node src/cli.js tunel --cf-host 2>/dev/null | head -1)"
-    if [ -n "$h" ]; then printf 'https://%s' "$h"; return 0; fi
+  h="$(node src/cli.js tunel --cf-host 2>/dev/null | head -1)"
+  if [ -n "$h" ] && pgrep -f cloudflared >/dev/null 2>&1; then
+    printf 'https://%s' "$h"; return 0
   fi
   curl -sf --max-time 2 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
     | sed -n 's/.*"public_url":"\(https:[^"]*\)".*/\1/p' | head -1
