@@ -107,6 +107,13 @@ if errorlevel 1 (
 )
 
 rem ------------------------------------------------- 5. Yapilandirma + kisayol
+echo         Dis erisim araci ^(cloudflared^) kuruluyor...
+where cloudflared >nul 2>&1
+if errorlevel 1 (
+  winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements >> logs\kurulum.log 2>&1
+  if errorlevel 1 echo         cloudflared kurulamadi - dis erisim icin sonra VOKU menusunden kurulabilir.
+)
+
 echo         Tarayici motoru ^(Chromium^) indiriliyor...
 call npx playwright install chromium >> logs\kurulum.log 2>&1
 if errorlevel 1 (

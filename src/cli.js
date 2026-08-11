@@ -444,6 +444,20 @@ async function main() {
         log.ok(`Açılışta dış erişim ${acik ? 'açılacak' : 'açılmayacak'}.`);
         return;
       }
+      if (opsiyon['cf-kaydet'] && opsiyon['cf-kaydet'] !== true) {
+        // --cf-kaydet <token> --host <adres>
+        const s = t.cloudflareKaydet(opsiyon['cf-kaydet'], opsiyon.host);
+        log.ok(`Cloudflare tüneli kaydedildi: ${s.cfHostname}`);
+        return;
+      }
+      if (opsiyon['cf-token']) {
+        console.log(t.tunelAyarlari().cfToken || '');
+        return;
+      }
+      if (opsiyon['cf-host']) {
+        console.log(t.tunelAyarlari().cfHostname || '');
+        return;
+      }
       // Betikler bu iki satırı okuyor.
       const s = t.tunelAyarlari();
       console.log(s.domain || '');

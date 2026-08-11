@@ -42,9 +42,18 @@ bekle() { printf '\n%s' "  ${SOLUK}Devam etmek için Enter'a bas...${SIFIR}"; re
 
 # ---- durum ------------------------------------------------------------
 panel_pid()  { lsof -ti:"$PORT" 2>/dev/null | head -1; }
-tunel_pid()  { pgrep -f "ngrok http $PORT" 2>/dev/null | head -1; }
+tunel_pid()  { pgrep -f "cloudflared tunnel" 2>/dev/null | head -1 || pgrep -f "ngrok http $PORT" 2>/dev/null | head -1; }
+tunel_kapat() { pkill -f "cloudflared tunnel" 2>/dev/null; pkill -f "ngrok http $PORT" 2>/dev/null; }
 
 tunel_adresi() {
+  # cloudflared quick tunnel (bant sınırsız) → named tunnel sabit adres → ngrok
+  local h
+  h="$(curl -sf --max-time 2 http://127.0.0.1:4041/quicktunnel 2>/dev/null | sed -n 's/.*"hostname":"\([^"]*\)".*/\1/p')"
+  if [ -n "$h" ]; then printf 'https://%s' "$h"; return 0; fi
+  if curl -sf --max-time 2 http://127.0.0.1:4041/ready >/dev/null 2>&1; then
+    h="$(node src/cli.js tunel --cf-host 2>/dev/null | head -1)"
+    if [ -n "$h" ]; then printf 'https://%s' "$h"; return 0; fi
+  fi
   curl -sf --max-time 2 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
     | sed -n 's/.*"public_url":"\(https:[^"]*\)".*/\1/p' | head -1
 }
@@ -210,13 +219,30 @@ paylasim_linki() {
 # alınan adresi kaydeder ki bir dahaki sefere aynısı istensin.
 tuneli_baslat() {
   # "Süreç var" tek başına yeterli değil: ölmekte olan ya da çökmüş bir
-  # ngrok örneği pgrep'te görünüp tüneli hazır sanmaya yol açıyor. Ölçüt
-  # adresin gerçekten alınabilmesi; alınamıyorsa artık süreç temizlenir.
+  # örnek pgrep'te görünüp tüneli hazır sanmaya yol açıyor. Ölçüt adresin
+  # gerçekten alınabilmesi; alınamıyorsa artık süreç temizlenir.
   if [ -n "$(tunel_pid)" ]; then
     [ -n "$(tunel_adresi)" ] && return 0
-    pkill -f "ngrok http $PORT" 2>/dev/null
+    tunel_kapat
     sleep 1
   fi
+
+  # cloudflared (token'lı sabit tünel) birincil: bant/istek sınırı yok.
+  # Token yoksa cloudflared hiç denenmez — ngrok yedeğine düşülür.
+  local cf_token adres=""
+  cf_token="$(node src/cli.js tunel --cf-token 2>/dev/null | head -1)"
+  if command -v cloudflared >/dev/null && [ -n "$cf_token" ]; then
+    nohup cloudflared tunnel run --token "$cf_token" --metrics 127.0.0.1:4041 >> logs/cloudflared.log 2>&1 &
+    for _ in $(seq 1 30); do
+      sleep 0.5
+      adres="$(tunel_adresi)"
+      [ -n "$adres" ] && return 0
+    done
+    # cloudflared açılamadı — temizle, ngrok'a düş.
+    pkill -f "cloudflared tunnel" 2>/dev/null
+    sleep 1
+  fi
+
   command -v ngrok >/dev/null || return 1
   ngrok config check >/dev/null 2>&1 || return 1
 
@@ -255,26 +281,31 @@ tuneli_baslat() {
 disariya_ac() {
   panel_baslat || { bekle; return; }
 
-  if ! command -v ngrok >/dev/null; then
+  local cf_hazir=""
+  if command -v cloudflared >/dev/null && [ -n "$(node src/cli.js tunel --cf-token 2>/dev/null | head -1)" ]; then
+    cf_hazir="1"
+  fi
+  if [ -z "$cf_hazir" ] && ! command -v ngrok >/dev/null; then
     yaz ""
-    yaz "  ${KIRMIZI}Dış erişim aracı (ngrok) kurulu değil.${SIFIR}"
+    yaz "  ${KIRMIZI}Dış erişim aracı (cloudflared) kurulu değil.${SIFIR}"
     if command -v brew >/dev/null; then
       printf '%s' "  Şimdi kurulsun mu? (e/h): "
       read -r c
       if [ "$c" = "e" ] || [ "$c" = "E" ]; then
         yaz "  ${SOLUK}Kuruluyor...${SIFIR}"
-        brew install ngrok >> logs/kurulum.log 2>&1 || {
+        brew install cloudflared >> logs/kurulum.log 2>&1 || {
           yaz "  ${KIRMIZI}Kurulamadı.${SIFIR} ${SOLUK}logs/kurulum.log${SIFIR}"; bekle; return; }
       else
         return
       fi
     else
-      yaz "  ${SOLUK}Kurulum: https://ngrok.com/download${SIFIR}"
+      yaz "  ${SOLUK}Kurulum: brew install cloudflared${SIFIR}"
       bekle; return
     fi
   fi
 
-  if ! ngrok config check >/dev/null 2>&1; then
+  # ngrok hesabı yalnız token'lı cloudflared hazır değilse gerekir.
+  if [ -z "$cf_hazir" ] && ! ngrok config check >/dev/null 2>&1; then
     yaz ""
     yaz "  ${KIRMIZI}ngrok hesabı bağlı değil.${SIFIR}"
     yaz "  ${SOLUK}ngrok.com'da ücretsiz hesap aç, panelindeki komutu bir kez çalıştır:${SIFIR}"
@@ -286,7 +317,7 @@ disariya_ac() {
     yaz "  ${SOLUK}Dış erişim açılıyor...${SIFIR}"
   fi
   if ! tuneli_baslat; then
-    yaz "  ${KIRMIZI}Dış adres alınamadı.${SIFIR} ${SOLUK}logs/ngrok.log dosyasına bak.${SIFIR}"
+    yaz "  ${KIRMIZI}Dış adres alınamadı.${SIFIR} ${SOLUK}logs/cloudflared.log dosyasına bak.${SIFIR}"
     bekle; return
   fi
 
@@ -314,7 +345,7 @@ disariyi_kapat() {
   if [ -z "$(tunel_pid)" ]; then
     yaz "  ${SOLUK}Dış erişim zaten kapalı.${SIFIR}"; sleep 1; return
   fi
-  pkill -f "ngrok http $PORT" 2>/dev/null
+  tunel_kapat
   sleep 1
   yaz "  ${YESIL}Dış erişim kapatıldı — paylaşılan bağlantı artık açılmaz.${SIFIR}"
   sleep 1
@@ -335,6 +366,7 @@ hepsini_kapat() {
   printf '%s' "  Panel, Telegram botu ve dış erişim kapatılsın mı? (e/h): "
   read -r c
   [ "$c" = "e" ] || [ "$c" = "E" ] || return
+  pkill -f "cloudflared tunnel" 2>/dev/null
   pkill -f "ngrok http $PORT" 2>/dev/null
   pkill -f "cli.js panel" 2>/dev/null
   sleep 1

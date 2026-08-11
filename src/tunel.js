@@ -24,10 +24,24 @@ export function tunelAyarlari() {
     /* yoksa varsayılan */
   }
   return {
-    domain: ham.domain || null,
+    domain: ham.domain || null, // ngrok sabit adresi (eski kurulumlar)
+    // cloudflared named tunnel: token + sabit adres (Cloudflare panosundan).
+    cfToken: ham.cfToken || null,
+    cfHostname: ham.cfHostname || null,
     // Kontrol paneli açıldığında panel ve dış erişim kendiliğinden kalksın.
     acilistaAc: ham.acilistaAc !== false,
   };
+}
+
+/** Cloudflare named tunnel bilgilerini kaydeder (token + sabit adres). */
+export function cloudflareKaydet(token, hostname) {
+  const t = String(token || '').trim();
+  const h = String(hostname || '')
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .trim();
+  if (!t || !h) throw new Error('Token ve sabit adres (hostname) birlikte gerekli.');
+  return yaz({ ...tunelAyarlari(), cfToken: t, cfHostname: h });
 }
 
 function yaz(s) {
@@ -60,6 +74,39 @@ let onbellek = { at: 0, veri: { acik: false } };
 export async function disErisimDurumu() {
   if (Date.now() - onbellek.at < 5000) return onbellek.veri;
   let veri = { acik: false, adres: null };
+
+  // 1) cloudflared (metrics 4041): quick tunnel adresi ya da named tunnel
+  // hazır sinyali. ngrok'un aksine bant/istek sınırı yok.
+  try {
+    const y = await fetch('http://127.0.0.1:4041/quicktunnel', {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (y.ok) {
+      const j = await y.json().catch(() => ({}));
+      if (j.hostname) veri = { acik: true, adres: `https://${j.hostname}` };
+    }
+  } catch {
+    /* cloudflared kapalı ya da quick modda değil */
+  }
+  if (!veri.acik) {
+    try {
+      const y = await fetch('http://127.0.0.1:4041/ready', {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (y.ok) {
+        const s = tunelAyarlari();
+        if (s.cfHostname) veri = { acik: true, adres: `https://${s.cfHostname}` };
+      }
+    } catch {
+      /* named tunnel da yok — ngrok'a bak */
+    }
+  }
+  if (veri.acik) {
+    onbellek = { at: Date.now(), veri };
+    return veri;
+  }
+
+  // 2) ngrok (4040) — eski kurulumlar için yedek yol.
   try {
     const yanit = await fetch('http://127.0.0.1:4040/api/tunnels', {
       signal: AbortSignal.timeout(1500),

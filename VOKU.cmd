@@ -105,10 +105,17 @@ if "%PANEL%"=="calisiyor" (
   )
 )
 
-tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
+tasklist /fi "imagename eq cloudflared.exe" 2>nul | find /i "cloudflared.exe" >nul
 if not errorlevel 1 (
-  for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const t=JSON.parse(s).tunnels.find(x=>x.public_url.startsWith('https'));console.log(t?t.public_url:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
+  call :cf_adres
   if not "!ADRES!"=="" set "TUNEL=acik"
+)
+if not "!TUNEL!"=="acik" (
+  tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
+  if not errorlevel 1 (
+    for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4040/api/tunnels 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const t=JSON.parse(s).tunnels.find(x=>x.public_url.startsWith('https'));console.log(t?t.public_url:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
+    if not "!ADRES!"=="" set "TUNEL=acik"
+  )
 )
 
 schtasks /query /tn "VOKU Panel" >nul 2>&1
@@ -155,6 +162,26 @@ exit /b
 rem Tuneli baslatir: kayitli adres varsa onunla (baglanti degismesin),
 rem alinamazsa serbest adresle tekrar dener ve yeni adresi kaydeder.
 :tunel_baslat
+rem cloudflared birincil: bant/istek siniri yok (ngrok 1GB/ay'da tikaniyordu).
+tasklist /fi "imagename eq cloudflared.exe" 2>nul | find /i "cloudflared.exe" >nul
+if not errorlevel 1 (
+  call :cf_adres
+  if not "!ADRES!"=="" exit /b 0
+  taskkill /f /im cloudflared.exe >nul 2>&1
+  timeout /t 1 /nobreak >nul
+)
+set "CFTOKEN="
+for /f "delims=" %%T in ('node src\cli.js tunel --cf-token 2^>nul') do set "CFTOKEN=%%T"
+where cloudflared >nul 2>&1
+if not errorlevel 1 if not "!CFTOKEN!"=="" (
+  start "" /b cmd /c "cloudflared tunnel run --token !CFTOKEN! --metrics 127.0.0.1:4041 >> logs\cloudflared.log 2>&1"
+  call :cf_adres_bekle
+  if not "!ADRES!"=="" exit /b 0
+  taskkill /f /im cloudflared.exe >nul 2>&1
+  timeout /t 1 /nobreak >nul
+)
+
+rem --- ngrok yedek yolu ---
 rem "Surec var" yeterli degil: olmekte olan bir ngrok ornegi tunelin hazir
 rem sanilmasina yol aciyor. Olcut adresin alinabilmesi.
 tasklist /fi "imagename eq ngrok.exe" 2>nul | find /i "ngrok.exe" >nul
@@ -193,6 +220,27 @@ if "!ADRES!"=="" exit /b 1
 
 :tunel_kaydet
 call node src\cli.js tunel --kaydet "!ADRES!" >nul 2>&1
+exit /b 0
+
+:cf_adres
+set "ADRES="
+for /f "delims=" %%A in ('curl -s --max-time 2 http://127.0.0.1:4041/quicktunnel 2^>nul ^| node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.hostname?'https://'+j.hostname:'')}catch{console.log('')}})" 2^>nul') do set "ADRES=%%A"
+if not "!ADRES!"=="" exit /b 0
+curl -sf --max-time 2 http://127.0.0.1:4041/ready >nul 2>&1
+if not errorlevel 1 (
+  for /f "delims=" %%H in ('node src\cli.js tunel --cf-host 2^>nul') do (
+    if not "%%H"=="" set "ADRES=https://%%H"
+  )
+)
+exit /b 0
+
+:cf_adres_bekle
+set "ADRES="
+for /l %%i in (1,1,30) do (
+  timeout /t 1 /nobreak >nul
+  call :cf_adres
+  if not "!ADRES!"=="" exit /b 0
+)
 exit /b 0
 
 :adres_bekle
@@ -236,19 +284,25 @@ goto menu
 
 :disariya_ac
 call :panel_baslat || goto menu
+set "CFT="
+for /f "delims=" %%T in ('node src\cli.js tunel --cf-token 2^>nul') do set "CFT=%%T"
+where cloudflared >nul 2>&1
+if not errorlevel 1 if not "!CFT!"=="" goto :dis_ac_devam
 where ngrok >nul 2>&1
 if errorlevel 1 (
   echo.
-  echo   Dis erisim araci ^(ngrok^) kurulu degil.
+  echo   Dis erisim araci ^(cloudflared^) kurulu degil.
   set "c="
   set /p "c=  Simdi kurulsun mu? (e/h): "
   if /i "!c!"=="e" (
-    winget install --id ngrok.ngrok -e --accept-source-agreements --accept-package-agreements
+    winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements
     set "PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links"
+    goto :dis_ac_devam
   ) else (
     goto menu
   )
 )
+rem cloudflared yok ama ngrok var: hesap bagliligi kontrol edilir.
 ngrok config check >nul 2>&1
 if errorlevel 1 (
   echo.
@@ -260,10 +314,11 @@ if errorlevel 1 (
   goto menu
 )
 
+:dis_ac_devam
 echo   Dis erisim aciliyor...
 call :tunel_baslat
 if "!ADRES!"=="" (
-  echo   Dis adres alinamadi. logs\ngrok.log dosyasina bak.
+  echo   Dis adres alinamadi. logs\cloudflared.log dosyasina bak.
   pause
   goto menu
 )
@@ -290,6 +345,7 @@ pause
 goto menu
 
 :disariyi_kapat
+taskkill /f /im cloudflared.exe >nul 2>&1
 taskkill /f /im ngrok.exe >nul 2>&1
 echo   Dis erisim kapatildi - paylasilan baglanti artik acilmaz.
 timeout /t 2 /nobreak >nul
@@ -310,6 +366,7 @@ goto menu
 set "c="
 set /p "c=  Panel, Telegram botu ve dis erisim kapatilsin mi? (e/h): "
 if /i not "%c%"=="e" goto menu
+taskkill /f /im cloudflared.exe >nul 2>&1
 taskkill /f /im ngrok.exe >nul 2>&1
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%VPORT% .*LISTENING"') do taskkill /f /pid %%P >nul 2>&1
 echo   Kapatildi. Suren isler varsa panel acilinca kaldigi yerden devam eder.
