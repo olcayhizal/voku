@@ -267,14 +267,34 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
     }).catch((e) => log.warn(`Telegram mesaj gönderilemedi: ${e.message}`));
 
   /** file_id → geçici dosya. */
+  /**
+   * Fotoğrafı Telegram'dan indirir — 3 denemeli. Art arda gönderimlerde
+   * Telegram'ın kapattığı keep-alive soketine denk gelen fetch "fetch
+   * failed" ile düşüyor ve fotoğraf iş açılamadan yanıyordu; indirme
+   * idempotent olduğu için kısa aralıkla yeniden denemek güvenli.
+   */
   async function dosyayiIndir(fileId, adIpucu = 'foto') {
-    const bilgi = await tgIstek('getFile', { file_id: fileId });
-    const uzanti = path.extname(bilgi.file_path || '') || '.jpg';
-    const yanit = await fetch(`${API}/file/bot${tg.token}/${bilgi.file_path}`);
-    if (!yanit.ok) throw new Error(`Dosya indirilemedi (${yanit.status})`);
-    const hedef = path.join(os.tmpdir(), `voku-tg-${adIpucu}-${fileId.slice(-8)}${uzanti}`);
-    fs.writeFileSync(hedef, Buffer.from(await yanit.arrayBuffer()));
-    return hedef;
+    let sonHata;
+    for (let deneme = 1; deneme <= 3; deneme++) {
+      try {
+        const bilgi = await tgIstek('getFile', { file_id: fileId });
+        const uzanti = path.extname(bilgi.file_path || '') || '.jpg';
+        const yanit = await fetch(`${API}/file/bot${tg.token}/${bilgi.file_path}`, {
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!yanit.ok) throw new Error(`Dosya indirilemedi (${yanit.status})`);
+        const hedef = path.join(os.tmpdir(), `voku-tg-${adIpucu}-${fileId.slice(-8)}${uzanti}`);
+        fs.writeFileSync(hedef, Buffer.from(await yanit.arrayBuffer()));
+        return hedef;
+      } catch (e) {
+        sonHata = e;
+        if (deneme < 3) {
+          log.warn(`Telegram foto indirme ${deneme}. denemede düştü (${String(e?.message || e).slice(0, 60)}) — yeniden deneniyor`);
+          await new Promise((r) => setTimeout(r, 1500 * deneme));
+        }
+      }
+    }
+    throw sonHata;
   }
 
   /* ---------------- mesaj işleme ---------------- */
