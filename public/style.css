@@ -1237,7 +1237,7 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
 .abonelik-tablo th, .abonelik-tablo td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--edge); }
 .abonelik-tablo th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-dim); }
 
-/* Bakım desteği: dönem ilerleme barı + kapsam kartları */
+/* Bakım desteği: dönem ilerleme barı */
 .donem-bar-kap { max-width: 640px; margin: -6px 0 18px; }
 .donem-bar {
   height: 6px;
