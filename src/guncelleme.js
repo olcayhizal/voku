@@ -38,8 +38,9 @@ export function guncellemeAyarlari() {
     /* dosya yoksa varsayılanlar */
   }
   return {
-    // Otomatik güncelleme kapalı başlar: kullanıcı açıkça açmalı.
-    otomatik: ham.otomatik === true,
+    // Otomatik güncelleme AÇIK başlar — panel kendini güncel tutar;
+    // istemeyen VOKU menüsünden (8) kapatır.
+    otomatik: ham.otomatik !== false,
     dal: ham.dal || 'main',
   };
 }
