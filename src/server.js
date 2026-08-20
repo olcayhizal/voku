@@ -1011,33 +1011,56 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   // başlatır — kimsenin VOKU menüsünden elle güncellemesi gerekmez.
   const yenidenBaslat = async () => {
     log.ok('Güncelleme uygulandı — panel yeni sürümle yeniden başlıyor…');
-    clearInterval(bekci);
-    clearInterval(falSayaci);
-    clearInterval(limitSayaci);
-    clearInterval(guncellemeBekcisi);
-    if (durum.telegram) durum.telegram.durdur();
-    try { await adaptorAl('chatgpt-tarayici').kapat?.(); } catch { /* açık değildi */ }
-    try { adaptorAl('gemini-http').koprulariDurdur?.(); } catch { /* açık değildi */ }
-    for (const res of sseIstemcileri) {
-      try { res.end(); } catch { /* koptuysa sorun değil */ }
-    }
-    await new Promise((coz) => {
-      sunucu.close(() => coz());
-      sunucu.closeAllConnections?.();
-      setTimeout(coz, 3000);
-    });
+
+    // ÖNCE yeni süreç doğar (port doluysa kendi bekler — listen retry'lı),
+    // yaşadığı doğrulanır, ANCAK ONDAN SONRA bu süreç kapanır. Çocuk hemen
+    // ölürse restart iptal: panel eski sürümle ayakta kalır — hiçbir durumda
+    // panelsiz (dışarıdan 502) kalınmaz.
     fs.mkdirSync(path.join(ROOT, 'logs'), { recursive: true });
     const kayit = fs.openSync(path.join(ROOT, 'logs', 'panel.out'), 'a');
+    // Mac'te panel caffeinate ile sarılı başlatılır (uyku engeli) — restart
+    // bu sarmalayıcıyı korusun; diğer platformlarda düz node.
     const [komut, onArgumanlar] =
       process.platform === 'darwin'
         ? ['caffeinate', ['-dimsu', process.execPath]]
         : [process.execPath, []];
-    spawn(komut, [...onArgumanlar, ...process.argv.slice(1)], {
+    const cocuk = spawn(komut, [...onArgumanlar, ...process.argv.slice(1)], {
       cwd: ROOT,
       detached: true,
+      windowsHide: true,
       stdio: ['ignore', kayit, kayit],
       env: process.env,
-    }).unref();
+    });
+    cocuk.unref();
+    const dogdu = await new Promise((coz) => {
+      let bitti = false;
+      cocuk.once('error', () => { if (!bitti) { bitti = true; coz(false); } });
+      cocuk.once('exit', () => { if (!bitti) { bitti = true; coz(false); } });
+      setTimeout(() => { if (!bitti) { bitti = true; coz(true); } }, 2500);
+    });
+    if (!dogdu) {
+      log.err('Yeni panel süreci başlatılamadı — yeniden başlatma iptal, panel mevcut sürümle sürüyor.');
+      return;
+    }
+
+    clearInterval(bekci);
+    clearInterval(falSayaci);
+    clearInterval(limitSayaci);
+    clearInterval(guncellemeBekcisi);
+    clearInterval(abonelikSayaci);
+    if (durum.telegram) durum.telegram.durdur();
+    try { await adaptorAl('chatgpt-tarayici').kapat?.(); } catch { /* açık değildi */ }
+    try { adaptorAl('gemini-http').koprulariDurdur?.(); } catch { /* açık değildi */ }
+    // SSE bağlantıları sunucuyu açık tutmasın; panel arayüzü kopunca
+    // kendiliğinden yeniden bağlanır.
+    for (const res of sseIstemcileri) {
+      try { res.end(); } catch { /* koptuysa sorun değil */ }
+    }
+    sunucu.closeAllConnections?.();
+    await new Promise((coz) => {
+      sunucu.close(() => coz());
+      setTimeout(coz, 3000);
+    });
     process.exit(0);
   };
 
