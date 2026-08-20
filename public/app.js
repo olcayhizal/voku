@@ -1648,31 +1648,6 @@ function abonelikCiz() {
     );
   }
 
-  // Kapsam: bu ücretin neyi karşıladığı — panelde her zaman görünür dursun.
-  kap.append(
-    el('h3', { class: 'abonelik-baslik', text: 'Bakım desteği neleri kapsar' }),
-    el('div', { class: 'kapsam-izgara' },
-      ...[
-        ['⟳', 'Sürekli güncelleme', 'Yeni özellikler ve hata düzeltmeleri panel çalışırken kendiliğinden gelir — kurulumla uğraşmazsın.'],
-        ['⚙', 'Motor bakımı', 'ChatGPT, Gemini ve fal tarafında bir şey değiştiğinde (arayüz, limit, oturum) sistem buna uyarlanır; üretim aksarsa onarılır.'],
-        ['◈', 'Yedek üretim hakkı', 'Hesap limitleri dolduğunda kareler fal API yedeğinden üretilmeye devam eder — bakiyesi bu destek kapsamındadır.'],
-        ['✆', 'Destek', 'Takılan iş, hatalı kare, kurulum sorusu — doğrudan sistem sahibine ulaşırsın, çözüm bu kapsamda.'],
-      ].map(([ikon, baslik, metin]) =>
-        el('div', { class: 'kapsam-kart' },
-          el('div', { class: 'kapsam-ust' },
-            el('span', { class: 'kapsam-ikon', text: ikon }),
-            el('strong', { text: baslik })
-          ),
-          el('p', { class: 'alt-metin', text: metin })
-        )
-      )
-    ),
-    el('p', {
-      class: 'alt-metin kapsam-dip',
-      text: 'Süre dolduğunda üretim duraklar; mevcut işlerin ve dosyaların tamamı erişilebilir kalır. Ödeme sonrası süre panele dakikalar içinde yansır ve her şey kaldığı yerden devam eder.',
-    })
-  );
-
   if (!a?.aktif && !a?.bilinmiyor) {
     kap.append(el('div', { class: 'uyari', text: 'Bakım desteği süresi doldu: yeni iş açma ve üretim başlatma duraklatıldı. Mevcut işler ve dosyalar görüntülenebilir. Yenileme için sistem sahibiyle iletişime geç; ödeme sonrası "Durumu yenile" ile süre anında güncellenir.' }));
   }

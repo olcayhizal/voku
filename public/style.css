@@ -1262,25 +1262,3 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
   color: var(--paper-dim);
   margin-top: 5px;
 }
-.kapsam-izgara {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-  max-width: 640px; /* durum kartıyla hizalı → 2×2 dizilim */
-}
-.kapsam-kart {
-  background: var(--tray);
-  border: 1px solid var(--edge);
-  border-radius: var(--r);
-  padding: 13px 15px;
-}
-.kapsam-ust { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
-.kapsam-ikon {
-  width: 26px; height: 26px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--safelight-loş);
-  border-radius: 6px;
-  color: var(--safelight);
-  font-size: 14px;
-}
-.kapsam-dip { margin-top: 12px; max-width: 76ch; }
