@@ -263,6 +263,12 @@ function durumPaketi(ayarlar) {
 }
 
 async function jobuArkaPlandaCalistir(job, ayarlar) {
+  // Merkezi kilit: uçlardaki kontrollere ek olarak limit bekçisi ve bot
+  // yolu da buradan geçer — süre dolmuşken hiçbir yol üretim başlatamaz.
+  if (!abonelikAktifMi()) {
+    log.warn(`${job.id} başlatılmadı — bakım desteği süresi dolmuş.`);
+    return;
+  }
   if (durum.kosanJoblar.has(job.id)) return;
   // Çağıranın elindeki kopya bayat olabilir (iş bu arada elle koşulup
   // bitmiş olabilir) — diskten taze oku, bitmiş task'lar yeniden üretilmesin.
@@ -716,7 +722,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
   // --- joblar ---
   if (yol === '/api/jobs' && req.method === 'POST') {
-    if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — yeni iş açılamıyor. Ayrıntı: header\'daki abonelik sayacı.' });
+    if (!abonelikAktifMi()) return json(res, 402, { hata: 'Bakım desteği süresi doldu — yeni iş açılamıyor. Ayrıntı: header\'daki gün sayacı.' });
     const govde = await govdeOku(req);
     try {
       if (!govde.imageBase64) throw new Error('Fotoğraf gerekli.');
@@ -773,14 +779,14 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     }
 
     if (eylem === 'run' && req.method === 'POST') {
-      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Bakım desteği süresi doldu — üretim başlatılamıyor.' });
       if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'Bu iş zaten çalışıyor.' });
       jobuArkaPlandaCalistir(job, ayarlar);
       return json(res, 202, { ok: true });
     }
 
     if (eylem === 'retry' && req.method === 'POST') {
-      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Bakım desteği süresi doldu — üretim başlatılamıyor.' });
       const govde = await govdeOku(req);
       let sayac = 0;
       for (const t of job.tasks) {
@@ -801,7 +807,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
     // Tek task'ı fal API ile üret ("fal ile dene" butonu).
     if (eylem === 'fal' && req.method === 'POST') {
-      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Bakım desteği süresi doldu — üretim başlatılamıyor.' });
       const govde = await govdeOku(req);
       if (!ayarlar.fal?.apiKey) return json(res, 400, { hata: 'fal API anahtarı tanımlı değil.' });
       if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'Bu iş zaten çalışıyor — bitince dene.' });
@@ -991,7 +997,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
 
   // --- Abonelik kontrolü: açılışta + 6 saatte bir ---
   lisansTazele().then((d) => {
-    if (!d.bilinmiyor) log.info(`Abonelik: ${d.aktif ? `${d.kalanGun} gün kaldı` : 'süre doldu'} (bitiş ${String(d.bitis).slice(0, 10)})`);
+    if (!d.bilinmiyor) log.info(`Bakım desteği: ${d.aktif ? `${d.kalanGun} gün kaldı` : 'süre doldu'} (bitiş ${String(d.bitis).slice(0, 10)})`);
     yayinla('abonelik', d);
   });
   const abonelikSayaci = setInterval(() => {

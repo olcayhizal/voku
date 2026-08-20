@@ -455,7 +455,7 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
     if (izinliMi && !izinliMi()) {
       await mesajYolla(
         taslak.chatId,
-        'Abonelik süresi dolduğu için şu an yeni iş açılamıyor. Yenileme için sistem sahibiyle iletişime geçin.'
+        'Bakım desteği süresi dolduğu için şu an yeni iş açılamıyor. Yenileme için sistem sahibiyle iletişime geçin.'
       );
       return;
     }

@@ -1566,8 +1566,8 @@ function abonelikRozeti() {
   return el('button', {
     class: `abonelik-rozet ${sinif}`,
     title: a.aktif
-      ? `Abonelik ${String(a.bitis).slice(0, 10)} tarihine kadar geçerli — ayrıntı için tıkla`
-      : 'Abonelik süresi doldu — ayrıntı için tıkla',
+      ? `Bakım desteği ${String(a.bitis).slice(0, 10)} tarihine kadar geçerli — ayrıntı için tıkla`
+      : 'Bakım desteği süresi doldu — ayrıntı için tıkla',
     onclick: abonelikSayfasiniAc,
   },
     el('i'),
@@ -1588,7 +1588,7 @@ function abonelikCiz() {
   const a = state.abonelik;
   kap.replaceChildren();
   if (!a || a.bilinmiyor) {
-    kap.append(el('p', { class: 'alt-metin', text: 'Abonelik bilgisi henüz alınamadı — internet bağlantısını kontrol edip "Durumu yenile"ye bas.' }));
+    kap.append(el('p', { class: 'alt-metin', text: 'Bakım desteği bilgisi henüz alınamadı — internet bağlantısını kontrol edip "Durumu yenile"ye bas.' }));
   }
   const tarih = (t) => (t ? String(t).slice(0, 10).split('-').reverse().join('.') : '—');
 
@@ -1625,7 +1625,7 @@ function abonelikCiz() {
   );
 
   if (!a?.aktif && !a?.bilinmiyor) {
-    kap.append(el('div', { class: 'uyari', text: 'Abonelik süresi doldu: yeni iş açma ve üretim başlatma kapalı. Mevcut işler ve dosyalar görüntülenebilir. Yenileme için sistem sahibiyle iletişime geç; ödeme sonrası "Durumu yenile" ile süre anında güncellenir.' }));
+    kap.append(el('div', { class: 'uyari', text: 'Bakım desteği süresi doldu: yeni iş açma ve üretim başlatma duraklatıldı. Mevcut işler ve dosyalar görüntülenebilir. Yenileme için sistem sahibiyle iletişime geç; ödeme sonrası "Durumu yenile" ile süre anında güncellenir.' }));
   }
   if (a?.mesaj) {
     kap.append(el('div', { class: 'abonelik-mesaj', text: a.mesaj }));

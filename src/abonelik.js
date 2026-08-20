@@ -77,7 +77,7 @@ export async function lisansTazele() {
     return durum();
   } catch (e) {
     if (!bellek) bellek = diskinden();
-    log.warn(`Abonelik kontrolü yapılamadı (${String(e?.message || e).slice(0, 60)}) — ${bellek ? 'son doğrulanmış lisansla devam' : 'lisans bulunamadı'}`);
+    log.warn(`Bakım desteği kontrolü yapılamadı (${String(e?.message || e).slice(0, 60)}) — ${bellek ? 'son doğrulanmış lisansla devam' : 'lisans bulunamadı'}`);
     return durum();
   }
 }
