@@ -1624,6 +1624,55 @@ function abonelikCiz() {
     )
   );
 
+  // Dönem ilerlemesi: son ödemeden (yoksa başlangıçtan) bitişe kalan pay.
+  if (a && !a.bilinmiyor && a.bitis) {
+    const sonOdeme = (a.odemeler || []).at(-1);
+    const donemBasi = new Date(sonOdeme?.tarih || a.baslangic || Date.now()).getTime();
+    const bitisMs = new Date(a.bitis).getTime();
+    const toplam = Math.max(1, bitisMs - donemBasi);
+    const kalanOran = Math.min(1, Math.max(0, (bitisMs - Date.now()) / toplam));
+    kap.append(
+      el('div', { class: 'donem-bar-kap' },
+        el('div', { class: 'donem-bar' },
+          el('div', {
+            class: `donem-bar-dolu ${!a.aktif ? 'dolu' : a.kalanGun <= 3 ? 'uyari' : ''}`,
+            style: `width:${Math.round(kalanOran * 100)}%`,
+          })
+        ),
+        el('div', { class: 'donem-bar-etiket' },
+          el('span', { text: `dönem başı ${tarih(sonOdeme?.tarih || a.baslangic)}` }),
+          el('span', { text: a.aktif ? `%${Math.round(kalanOran * 100)} kaldı` : 'dönem bitti' }),
+          el('span', { text: `bitiş ${tarih(a.bitis)}` })
+        )
+      )
+    );
+  }
+
+  // Kapsam: bu ücretin neyi karşıladığı — panelde her zaman görünür dursun.
+  kap.append(
+    el('h3', { class: 'abonelik-baslik', text: 'Bakım desteği neleri kapsar' }),
+    el('div', { class: 'kapsam-izgara' },
+      ...[
+        ['⟳', 'Sürekli güncelleme', 'Yeni özellikler ve hata düzeltmeleri panel çalışırken kendiliğinden gelir — kurulumla uğraşmazsın.'],
+        ['⚙', 'Motor bakımı', 'ChatGPT, Gemini ve fal tarafında bir şey değiştiğinde (arayüz, limit, oturum) sistem buna uyarlanır; üretim aksarsa onarılır.'],
+        ['◈', 'Yedek üretim hakkı', 'Hesap limitleri dolduğunda kareler fal API yedeğinden üretilmeye devam eder — bakiyesi bu destek kapsamındadır.'],
+        ['✆', 'Destek', 'Takılan iş, hatalı kare, kurulum sorusu — doğrudan sistem sahibine ulaşırsın, çözüm bu kapsamda.'],
+      ].map(([ikon, baslik, metin]) =>
+        el('div', { class: 'kapsam-kart' },
+          el('div', { class: 'kapsam-ust' },
+            el('span', { class: 'kapsam-ikon', text: ikon }),
+            el('strong', { text: baslik })
+          ),
+          el('p', { class: 'alt-metin', text: metin })
+        )
+      )
+    ),
+    el('p', {
+      class: 'alt-metin kapsam-dip',
+      text: 'Süre dolduğunda üretim duraklar; mevcut işlerin ve dosyaların tamamı erişilebilir kalır. Ödeme sonrası süre panele dakikalar içinde yansır ve her şey kaldığı yerden devam eder.',
+    })
+  );
+
   if (!a?.aktif && !a?.bilinmiyor) {
     kap.append(el('div', { class: 'uyari', text: 'Bakım desteği süresi doldu: yeni iş açma ve üretim başlatma duraklatıldı. Mevcut işler ve dosyalar görüntülenebilir. Yenileme için sistem sahibiyle iletişime geç; ödeme sonrası "Durumu yenile" ile süre anında güncellenir.' }));
   }

@@ -1236,3 +1236,51 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
 .abonelik-tablo { border-collapse: collapse; font-size: 12.5px; min-width: 420px; }
 .abonelik-tablo th, .abonelik-tablo td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--edge); }
 .abonelik-tablo th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-dim); }
+
+/* Bakım desteği: dönem ilerleme barı + kapsam kartları */
+.donem-bar-kap { max-width: 640px; margin: -6px 0 18px; }
+.donem-bar {
+  height: 6px;
+  background: var(--tray-2);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.donem-bar-dolu {
+  height: 100%;
+  background: var(--fixer);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.donem-bar-dolu.uyari { background: var(--safelight); }
+.donem-bar-dolu.dolu { background: var(--grease); }
+.donem-bar-etiket {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--paper-dim);
+  margin-top: 5px;
+}
+.kapsam-izgara {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  max-width: 640px; /* durum kartıyla hizalı → 2×2 dizilim */
+}
+.kapsam-kart {
+  background: var(--tray);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  padding: 13px 15px;
+}
+.kapsam-ust { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+.kapsam-ikon {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--safelight-loş);
+  border-radius: 6px;
+  color: var(--safelight);
+  font-size: 14px;
+}
+.kapsam-dip { margin-top: 12px; max-width: 76ch; }
