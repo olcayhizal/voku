@@ -148,7 +148,12 @@ export async function guncelle() {
 
   await takipliKullaniciDosyalariniDusur();
 
-  const kirli = await git('status', '--porcelain');
+  // Takipsiz dosyalar (??) güncellemeyi bloklamaz — ff-only pull onlara
+  // dokunmaz. Yalnız İZLENEN dosyalardaki değişiklik gerçek engeldir.
+  const kirli = (await git('status', '--porcelain'))
+    .split('\n')
+    .filter((satir) => satir && !satir.startsWith('??'))
+    .join('\n');
   if (kirli) {
     throw new Error(
       'Bu kurulumda kaydedilmemiş yerel değişiklikler var; güncelleme atlandı.\n' +
