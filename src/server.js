@@ -1018,8 +1018,6 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     if (durum.telegram) durum.telegram.durdur();
     try { await adaptorAl('chatgpt-tarayici').kapat?.(); } catch { /* açık değildi */ }
     try { adaptorAl('gemini-http').koprulariDurdur?.(); } catch { /* açık değildi */ }
-    // SSE bağlantıları sunucuyu açık tutmasın; panel arayüzü kopunca
-    // kendiliğinden yeniden bağlanır.
     for (const res of sseIstemcileri) {
       try { res.end(); } catch { /* koptuysa sorun değil */ }
     }
@@ -1030,8 +1028,6 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     });
     fs.mkdirSync(path.join(ROOT, 'logs'), { recursive: true });
     const kayit = fs.openSync(path.join(ROOT, 'logs', 'panel.out'), 'a');
-    // Mac'te panel caffeinate ile sarılı başlatılır (uyku engeli) — restart
-    // bu sarmalayıcıyı korusun; diğer platformlarda düz node.
     const [komut, onArgumanlar] =
       process.platform === 'darwin'
         ? ['caffeinate', ['-dimsu', process.execPath]]
@@ -1096,6 +1092,19 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   }, 60000);
   bekci.unref?.();
 
+  // Restart devri: eski süreç portu bırakmadan yeni süreç doğabilir —
+  // EADDRINUSE'da ölmek paneli tamamen düşürür (dışarıdan 502). Bekle-dene.
+  let dinlemeDenemesi = 0;
+  sunucu.on('error', (e) => {
+    if (e.code === 'EADDRINUSE' && dinlemeDenemesi < 15) {
+      dinlemeDenemesi += 1;
+      log.warn(`Port ${port} henüz boşalmadı — ${dinlemeDenemesi}. bekleme (2sn)`);
+      setTimeout(() => sunucu.listen(port, '127.0.0.1'), 2000);
+      return;
+    }
+    log.err(`Panel dinleyemedi: ${e.message}`);
+    process.exit(1);
+  });
   sunucu.listen(port, '127.0.0.1', () => {
     const adres = `http://127.0.0.1:${port}`;
     log.ok(`Panel açık: ${adres}`);
