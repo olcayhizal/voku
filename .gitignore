@@ -29,3 +29,4 @@ jobs/.havuz.json
 .*-test.mjs
 config/settings.json
 __pycache__/
+config/abonelik.json

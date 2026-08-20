@@ -1501,6 +1501,7 @@ function oturumlariCiz() {
   // Bar sağındaki bağlantı lambaları: üretim platformları + Telegram hattı.
   const lambalar = $('#barLambalar');
   lambalar.replaceChildren(
+    abonelikRozeti(),
     ...state.platformlar.map((p) =>
       el('span', {
         class: `oturum-lamba ${oturumSinifi(p) === 'acik' ? 'acik' : oturumSinifi(p) === 'kapali' ? 'kapali' : ''}`,
@@ -1554,6 +1555,107 @@ function oturumlariCiz() {
         : null
     )
   );
+}
+
+/* ================= ABONELİK ================= */
+/** Header'daki gün sayacı — tıklayınca abonelik sayfası açılır. */
+function abonelikRozeti() {
+  const a = state.abonelik;
+  if (!a || a.bilinmiyor) return null;
+  const sinif = !a.aktif ? 'kritik' : a.kalanGun <= 3 ? 'uyari' : 'acik';
+  return el('button', {
+    class: `abonelik-rozet ${sinif}`,
+    title: a.aktif
+      ? `Abonelik ${String(a.bitis).slice(0, 10)} tarihine kadar geçerli — ayrıntı için tıkla`
+      : 'Abonelik süresi doldu — ayrıntı için tıkla',
+    onclick: abonelikSayfasiniAc,
+  },
+    el('i'),
+    a.aktif ? `${a.kalanGun} gün` : 'süre doldu'
+  );
+}
+
+function abonelikSayfasiniAc() {
+  $$('.tab').forEach((t) => t.setAttribute('aria-selected', 'false'));
+  $$('.view').forEach((v) => v.classList.add('gizli'));
+  $('#view-abonelik').classList.remove('gizli');
+  abonelikCiz();
+}
+
+function abonelikCiz() {
+  const kap = $('#abonelikGovde');
+  if (!kap) return;
+  const a = state.abonelik;
+  kap.replaceChildren();
+  if (!a || a.bilinmiyor) {
+    kap.append(el('p', { class: 'alt-metin', text: 'Abonelik bilgisi henüz alınamadı — internet bağlantısını kontrol edip "Durumu yenile"ye bas.' }));
+  }
+  const tarih = (t) => (t ? String(t).slice(0, 10).split('-').reverse().join('.') : '—');
+
+  kap.append(
+    el('div', { class: `abonelik-kart ${a?.aktif ? (a.kalanGun <= 3 ? 'uyari' : 'aktif') : 'dolu'}` },
+      el('div', { class: 'abonelik-buyuk' },
+        el('span', { class: 'abonelik-sayi', text: a?.aktif ? String(a.kalanGun) : '0' }),
+        el('span', { class: 'abonelik-birim', text: a?.aktif ? 'gün kaldı' : 'süre doldu' })
+      ),
+      el('div', { class: 'abonelik-detay' },
+        el('div', {}, el('span', { class: 'alt-metin', text: 'Bitiş: ' }), el('strong', { text: tarih(a?.bitis) })),
+        a?.baslangic ? el('div', {}, el('span', { class: 'alt-metin', text: 'Başlangıç: ' }), el('span', { text: tarih(a.baslangic) })) : null,
+        a?.haftalikTL ? el('div', {}, el('span', { class: 'alt-metin', text: 'Haftalık: ' }), el('span', { text: `${a.haftalikTL} TL` })) : null,
+        a?.sonKontrol ? el('div', { class: 'alt-metin', text: `son kontrol: ${new Date(a.sonKontrol).toLocaleString('tr-TR')}` }) : null
+      ),
+      el('button', {
+        class: 'btn btn-ikincil btn-kucuk',
+        text: 'Durumu yenile',
+        title: 'Ödeme sonrası süre uzatıldıysa buradan hemen görünür',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            state.abonelik = await api('/api/abonelik/yenile', { method: 'POST' });
+            abonelikCiz();
+            oturumlariCiz();
+          } catch (hata) {
+            alert(hata.message);
+          } finally {
+            e.target.disabled = false;
+          }
+        },
+      })
+    )
+  );
+
+  if (!a?.aktif && !a?.bilinmiyor) {
+    kap.append(el('div', { class: 'uyari', text: 'Abonelik süresi doldu: yeni iş açma ve üretim başlatma kapalı. Mevcut işler ve dosyalar görüntülenebilir. Yenileme için sistem sahibiyle iletişime geç; ödeme sonrası "Durumu yenile" ile süre anında güncellenir.' }));
+  }
+  if (a?.mesaj) {
+    kap.append(el('div', { class: 'abonelik-mesaj', text: a.mesaj }));
+  }
+
+  const odemeler = a?.odemeler || [];
+  kap.append(el('h3', { class: 'abonelik-baslik', text: 'Ödeme geçmişi' }));
+  if (!odemeler.length) {
+    kap.append(el('p', { class: 'alt-metin', text: 'Henüz kayıtlı ödeme yok.' }));
+  } else {
+    const tablo = el('table', { class: 'abonelik-tablo' },
+      el('thead', {}, el('tr', {},
+        el('th', { text: 'Tarih' }),
+        el('th', { text: 'Tutar' }),
+        el('th', { text: 'Eklenen süre' }),
+        el('th', { text: 'Not' })
+      )),
+      el('tbody', {},
+        ...odemeler.slice().reverse().map((o) =>
+          el('tr', {},
+            el('td', { text: tarih(o.tarih) }),
+            el('td', { text: o.tutar ? `${o.tutar} TL` : '—' }),
+            el('td', { text: o.gun ? `${o.gun} gün` : '—' }),
+            el('td', { text: o.not || '' })
+          )
+        )
+      )
+    );
+    kap.append(tablo);
+  }
 }
 
 /** Bir platform+hesap için oturum objesini state'te bulur. */
@@ -1979,6 +2081,12 @@ function akisiBagla() {
       oturumlariCiz(); // header rozeti + fal oturum kartı
       return;
     }
+    if (tip === 'abonelik') {
+      state.abonelik = veri;
+      oturumlariCiz(); // header gün sayacı
+      if (!$('#view-abonelik').classList.contains('gizli')) abonelikCiz();
+      return;
+    }
     if (tip === 'kosu') {
       const job = state.joblar.find((j) => j.id === veri.id);
       if (job) job.kosuyor = veri.kosuyor;
@@ -2024,6 +2132,7 @@ async function durumuTazele() {
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;
   state.fal = durum.fal || null;
+  state.abonelik = durum.abonelik || null;
   state.joblar = durum.joblar;
   // Seçili iş silinmişse ilk işe düş; duruyorsa seçim korunur.
   if (state.seciliJob && !durum.joblar.some((j) => j.id === state.seciliJob)) {

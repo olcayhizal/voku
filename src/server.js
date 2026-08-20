@@ -28,6 +28,7 @@ import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
 import { guncellemeAyarlari, guncellemeVarMi, guncelle } from './guncelleme.js';
+import { lisansTazele, durum as abonelikDurumu, aktifMi as abonelikAktifMi } from './abonelik.js';
 import { havuzOzeti, uygunHesapVar, dinlenmeyiKaldir } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
@@ -250,6 +251,7 @@ function durumPaketi(ayarlar) {
     joblar: jobListele().map(jobOzet).reverse(),
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
     fal: falOzeti(),
+    abonelik: abonelikDurumu(),
     promptDosyasi: path.relative(ROOT, promptDosyaYolu()),
     ayarlar: {
       maxAttempts: ayarlar.maxAttempts,
@@ -676,6 +678,13 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     return json(res, 404, { hata: 'Bilinmeyen hesap eylemi' });
   }
 
+  // --- abonelik ---
+  if (yol === '/api/abonelik/yenile' && req.method === 'POST') {
+    const d = await lisansTazele();
+    yayinla('abonelik', d);
+    return json(res, 200, d);
+  }
+
   // --- fal.ai yedek üretim ---
   if (parcalar[1] === 'fal') {
     try {
@@ -707,6 +716,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
   // --- joblar ---
   if (yol === '/api/jobs' && req.method === 'POST') {
+    if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — yeni iş açılamıyor. Ayrıntı: header\'daki abonelik sayacı.' });
     const govde = await govdeOku(req);
     try {
       if (!govde.imageBase64) throw new Error('Fotoğraf gerekli.');
@@ -763,12 +773,14 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     }
 
     if (eylem === 'run' && req.method === 'POST') {
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
       if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'Bu iş zaten çalışıyor.' });
       jobuArkaPlandaCalistir(job, ayarlar);
       return json(res, 202, { ok: true });
     }
 
     if (eylem === 'retry' && req.method === 'POST') {
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
       const govde = await govdeOku(req);
       let sayac = 0;
       for (const t of job.tasks) {
@@ -789,6 +801,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
     // Tek task'ı fal API ile üret ("fal ile dene" butonu).
     if (eylem === 'fal' && req.method === 'POST') {
+      if (!abonelikAktifMi()) return json(res, 402, { hata: 'Abonelik süresi doldu — üretim başlatılamıyor.' });
       const govde = await govdeOku(req);
       if (!ayarlar.fal?.apiKey) return json(res, 400, { hata: 'fal API anahtarı tanımlı değil.' });
       if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'Bu iş zaten çalışıyor — bitince dene.' });
@@ -943,6 +956,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
       telegram: tgAyar,
       calistir: (job) => jobuArkaPlandaCalistir(job, ayarlar),
       bildir: (d) => yayinla('telegram', d),
+      izinliMi: () => abonelikAktifMi(),
     });
   } else if (telegram && tgAyar.enabled && !tgAyar.token) {
     log.warn('Telegram botu kapalı: config/telegram.json içinde token yok.');
@@ -974,6 +988,16 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
       else res.end();
     }
   });
+
+  // --- Abonelik kontrolü: açılışta + 6 saatte bir ---
+  lisansTazele().then((d) => {
+    if (!d.bilinmiyor) log.info(`Abonelik: ${d.aktif ? `${d.kalanGun} gün kaldı` : 'süre doldu'} (bitiş ${String(d.bitis).slice(0, 10)})`);
+    yayinla('abonelik', d);
+  });
+  const abonelikSayaci = setInterval(() => {
+    lisansTazele().then((d) => yayinla('abonelik', d)).catch(() => {});
+  }, 6 * 60 * 60 * 1000);
+  abonelikSayaci.unref?.();
 
   // --- Güncelleme bekçisi ---
   // "Otomatik güncelleme" açıkken panel periyodik olarak GitHub'ı yoklar;
@@ -1076,6 +1100,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
 
   const kapat = async () => {
     clearInterval(bekci);
+    clearInterval(abonelikSayaci);
     clearInterval(falSayaci);
     clearInterval(limitSayaci);
     clearInterval(guncellemeBekcisi);

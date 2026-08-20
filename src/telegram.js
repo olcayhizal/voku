@@ -182,7 +182,7 @@ export function kunyeCikar(metin) {
  *   sarmalayıcısını geçirir (kuyruk durumu ve "Durdur" düğmesi çalışsın diye).
  *   `bildir` hat durumu değişince çağrılır — panel lambası canlı kalsın diye.
  */
-export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
+export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {}) {
   const tg = telegram || telegramAyarlariniYukle();
   const durum = {
     acik: false,
@@ -451,6 +451,14 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir } = {}) {
 
   /** Toplama penceresi kapandı: fotoğraf başına bir job aç, sıraya koy. */
   async function taslagiIsle(taslak) {
+    // Abonelik süresi dolduysa iş açılmaz — gönderene nazikçe söylenir.
+    if (izinliMi && !izinliMi()) {
+      await mesajYolla(
+        taslak.chatId,
+        'Abonelik süresi dolduğu için şu an yeni iş açılamıyor. Yenileme için sistem sahibiyle iletişime geçin.'
+      );
+      return;
+    }
     const hamMetin = taslak.metinler.join(' · ');
     const varyant = teslimVaryanti(hamMetin);
     const { telefon, not } = kunyeCikar(hamMetin);

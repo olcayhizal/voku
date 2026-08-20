@@ -1181,3 +1181,58 @@ input::placeholder, textarea::placeholder { color: #5d6a74; }
   border-radius: 2px;
   padding: 0 4px;
 }
+
+/* ---------------- abonelik ---------------- */
+.abonelik-rozet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.abonelik-rozet i { width: 6px; height: 6px; border-radius: 50%; background: var(--edge-parlak); font-style: normal; }
+.abonelik-rozet.acik i { background: var(--fixer); }
+.abonelik-rozet.uyari { color: var(--safelight); border-color: var(--safelight-loş); }
+.abonelik-rozet.uyari i { background: var(--safelight); }
+.abonelik-rozet.kritik { color: var(--grease); border-color: var(--grease); }
+.abonelik-rozet.kritik i { background: var(--grease); animation: lamba-yanip 1.2s ease-in-out infinite; }
+.abonelik-rozet:hover { color: var(--paper); border-color: var(--edge-parlak); }
+
+.abonelik-kart {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  background: var(--tray);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--fixer);
+  border-radius: var(--r);
+  padding: 18px 22px;
+  margin-bottom: 16px;
+  max-width: 640px;
+}
+.abonelik-kart.uyari { border-left-color: var(--safelight); }
+.abonelik-kart.dolu { border-left-color: var(--grease); }
+.abonelik-buyuk { display: flex; flex-direction: column; align-items: center; min-width: 90px; }
+.abonelik-sayi { font-family: var(--display); font-size: 44px; font-weight: 600; line-height: 1; }
+.abonelik-kart.dolu .abonelik-sayi { color: var(--grease); }
+.abonelik-kart.uyari .abonelik-sayi { color: var(--safelight); }
+.abonelik-birim { font-family: var(--mono); font-size: 10.5px; color: var(--paper-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+.abonelik-detay { display: grid; gap: 3px; flex: 1; font-size: 13px; }
+.abonelik-baslik { margin: 18px 0 8px; }
+.abonelik-mesaj {
+  border-left: 2px solid var(--safelight);
+  background: color-mix(in srgb, var(--safelight) 10%, transparent);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  max-width: 640px;
+}
+.abonelik-tablo { border-collapse: collapse; font-size: 12.5px; min-width: 420px; }
+.abonelik-tablo th, .abonelik-tablo td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--edge); }
+.abonelik-tablo th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-dim); }
