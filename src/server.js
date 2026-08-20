@@ -27,6 +27,7 @@ import * as codexAdaptoru from './adapters/chatgpt-codex.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
+import { guncellemeAyarlari, guncellemeVarMi, guncelle } from './guncelleme.js';
 import { havuzOzeti, uygunHesapVar, dinlenmeyiKaldir } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
@@ -974,6 +975,70 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     }
   });
 
+  // --- Güncelleme bekçisi ---
+  // "Otomatik güncelleme" açıkken panel periyodik olarak GitHub'ı yoklar;
+  // yeni sürüm varsa ve hiçbir iş/giriş koşmuyorsa çekip KENDİNİ yeniden
+  // başlatır — kimsenin VOKU menüsünden elle güncellemesi gerekmez.
+  const yenidenBaslat = async () => {
+    log.ok('Güncelleme uygulandı — panel yeni sürümle yeniden başlıyor…');
+    clearInterval(bekci);
+    clearInterval(falSayaci);
+    clearInterval(limitSayaci);
+    clearInterval(guncellemeBekcisi);
+    if (durum.telegram) durum.telegram.durdur();
+    try { await adaptorAl('chatgpt-tarayici').kapat?.(); } catch { /* açık değildi */ }
+    try { adaptorAl('gemini-http').koprulariDurdur?.(); } catch { /* açık değildi */ }
+    // SSE bağlantıları sunucuyu açık tutmasın; panel arayüzü kopunca
+    // kendiliğinden yeniden bağlanır.
+    for (const res of sseIstemcileri) {
+      try { res.end(); } catch { /* koptuysa sorun değil */ }
+    }
+    await new Promise((coz) => {
+      sunucu.close(() => coz());
+      sunucu.closeAllConnections?.();
+      setTimeout(coz, 3000);
+    });
+    fs.mkdirSync(path.join(ROOT, 'logs'), { recursive: true });
+    const kayit = fs.openSync(path.join(ROOT, 'logs', 'panel.out'), 'a');
+    // Mac'te panel caffeinate ile sarılı başlatılır (uyku engeli) — restart
+    // bu sarmalayıcıyı korusun; diğer platformlarda düz node.
+    const [komut, onArgumanlar] =
+      process.platform === 'darwin'
+        ? ['caffeinate', ['-dimsu', process.execPath]]
+        : [process.execPath, []];
+    spawn(komut, [...onArgumanlar, ...process.argv.slice(1)], {
+      cwd: ROOT,
+      detached: true,
+      stdio: ['ignore', kayit, kayit],
+      env: process.env,
+    }).unref();
+    process.exit(0);
+  };
+
+  let sonGuncellemeHatasi = null;
+  const guncellemeAralik = Number(process.env.VOKU_GUNCELLEME_ARALIK_MS) || 15 * 60 * 1000;
+  const guncellemeBekcisi = setInterval(async () => {
+    if (!guncellemeAyarlari().otomatik) return;
+    // Üretim/giriş sürerken güncelleme uygulanmaz — sonraki tura kalır.
+    if (durum.kosanJoblar.size || durum.girisSurecleri.size || durum.loginContextleri.size) return;
+    try {
+      const k = await guncellemeVarMi({ zorla: true });
+      if (!k.var) return;
+      log.info(`Yeni sürüm bulundu (${k.adet} değişiklik: ${k.sonMesaj || ''}) — uygulanıyor…`);
+      const sonuc = await guncelle();
+      sonGuncellemeHatasi = null;
+      if (sonuc.degisti) await yenidenBaslat();
+    } catch (e) {
+      const mesaj = String(e?.message || e).split('\n')[0];
+      // Aynı hatayı her turda tekrarlama — bir kez logla.
+      if (mesaj !== sonGuncellemeHatasi) {
+        sonGuncellemeHatasi = mesaj;
+        log.warn(`Otomatik güncelleme uygulanamadı: ${mesaj}`);
+      }
+    }
+  }, guncellemeAralik);
+  guncellemeBekcisi.unref?.();
+
   // --- Limit bekçisi ---
   // Tüm hesapları limitte olduğu için pending kalan işler, reset saati gelince
   // "Başlat"ı beklemesin: bekçi periyodik bakar, o platformda uygun hesap
@@ -1013,6 +1078,7 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     clearInterval(bekci);
     clearInterval(falSayaci);
     clearInterval(limitSayaci);
+    clearInterval(guncellemeBekcisi);
     if (durum.telegram) durum.telegram.durdur();
     // Açık Gemini köprü süreçlerini kapat (çoklu hesapta birden fazla olabilir).
     try {
