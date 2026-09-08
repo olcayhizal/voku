@@ -120,6 +120,79 @@ function jobOzet(job) {
   };
 }
 
+/** YYYY-MM-DD (sunucu yerel günü) — panelin tarih süzgeciyle aynı eksen. */
+function gunAnahtari(d) {
+  const t = new Date(d);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+}
+
+/**
+ * Kuyruk sayfası: süzgeçler + sayfalama SUNUCUDA koşar. Panel açılışta tüm
+ * kuyruğu (aylar boyu iş × task detayı) çekiyordu — tünel üzerinden ciddi
+ * bant genişliği ve açılış süresi. Artık sayfa sayfa: süzgeçler ham job
+ * alanlarında uygulanır, maliyetli jobOzet yalnız dönen dilime çalışır
+ * (tek istisna: baskı durumu süzgeci özet ister, o da ucuz baskiOzetiCikar
+ * ile ham job üzerinden hesaplanır).
+ */
+function jobSayfasi(sorgu = {}) {
+  const limit = Math.max(0, Math.min(500, Number(sorgu.limit ?? 25) || 0));
+  const offset = Math.max(0, Number(sorgu.offset) || 0);
+  let liste = jobListele().reverse(); // yeniden eskiye
+
+  if (sorgu.kaynak && sorgu.kaynak !== 'tumu') {
+    liste = liste.filter((j) => kaynakNormalize(j.kaynak) === sorgu.kaynak);
+  }
+
+  const tarihTipi = sorgu.tarih || 'tumu';
+  if (tarihTipi !== 'tumu') {
+    const bugun = new Date();
+    const dun = new Date(bugun);
+    dun.setDate(dun.getDate() - 1);
+    liste = liste.filter((j) => {
+      const gun = gunAnahtari(j.createdAt);
+      if (tarihTipi === 'bugun') return gun === gunAnahtari(bugun);
+      if (tarihTipi === 'dun') return gun === gunAnahtari(dun);
+      // aralık: uçlar dahil, biri boşsa o yön sınırsız
+      if (sorgu.bas && gun < sorgu.bas) return false;
+      if (sorgu.bit && gun > sorgu.bit) return false;
+      return true;
+    });
+  }
+
+  if (sorgu.q) {
+    const parcalar = String(sorgu.q).toLocaleLowerCase('tr').split(/\s+/).filter(Boolean);
+    liste = liste.filter((j) => {
+      const havuz = [
+        j.id, j.phone, j.fakeId, j.note, kaynakNormalize(j.kaynak),
+        j.kaynakBilgi?.kullanici,
+        ...(j.tasks || []).map((t) => `${t.promptId} ${t.prompt}`),
+      ].filter(Boolean).join(' ').toLocaleLowerCase('tr');
+      return parcalar.every((p) => havuz.includes(p));
+    });
+  }
+
+  if (sorgu.is && sorgu.is !== 'tumu') {
+    liste = liste.filter((j) => {
+      const oz = baskiOzetiCikar(j) || { secili: 0, kopya: 0, basiliKopya: 0 };
+      const uretimBitti = (j.tasks || []).every((t) => t.status === 'done');
+      if (sorgu.is === 'uretimde') return !uretimBitti;
+      if (sorgu.is === 'basiliyor') return oz.secili > 0 && oz.basiliKopya < oz.kopya;
+      if (sorgu.is === 'basildi') return oz.kopya > 0 && oz.basiliKopya >= oz.kopya;
+      return true;
+    });
+  }
+
+  const toplam = liste.length; // süzgeç sonrası toplam (sayaç için)
+  // Cursor: canlı kuyrukta offset kayar (yeni iş düşünce sayfa atlar) —
+  // "şu tarihten eskiler" istenirse dilim oradan başlar.
+  if (sorgu.oncesi) {
+    liste = liste.filter((j) => String(j.createdAt) < String(sorgu.oncesi));
+  }
+  const joblar = liste.slice(offset, offset + limit).map(jobOzet);
+  return { joblar, toplam, dahaVar: offset + joblar.length < liste.length };
+}
+
 function json(res, kod, govde) {
   const g = JSON.stringify(govde);
   res.writeHead(kod, {
@@ -245,10 +318,14 @@ function platformDurumu(platform) {
   };
 }
 
-function durumPaketi(ayarlar) {
+function durumPaketi(ayarlar, islerLimit = 25) {
+  // isler=0: yalnız platform/rozet durumu istenir (sessiz tazeleme) —
+  // kuyruk /api/jobs'tan sayfa sayfa gelir, tam döküm artık yok.
+  const sayfa = jobSayfasi({ limit: islerLimit });
   return {
     platformlar: Object.values(ayarlar.platforms).map(platformDurumu),
-    joblar: jobListele().map(jobOzet).reverse(),
+    joblar: sayfa.joblar,
+    jobToplam: sayfa.toplam,
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
     fal: falOzeti(),
     abonelik: abonelikDurumu(),
@@ -522,7 +599,8 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
 
   // --- durum + canlı akış ---
   if (yol === '/api/state' && req.method === 'GET') {
-    const paket = durumPaketi(ayarlar);
+    const islerParam = url.searchParams.get('isler');
+    const paket = durumPaketi(ayarlar, islerParam === null ? 25 : Number(islerParam));
     // Dış erişim durumu ngrok'un kendi API'sinden gelir; panele girebilen
     // herkes bağlantıyı da görür (ekiple paylaşılan tek anahtar).
     const d = await disErisimDurumu();
@@ -721,6 +799,22 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
   }
 
   // --- joblar ---
+  // Kuyruk sayfası: süzgeçler + offset/limit sunucuda (bkz. jobSayfasi).
+  if (yol === '/api/jobs' && req.method === 'GET') {
+    const s = url.searchParams;
+    return json(res, 200, jobSayfasi({
+      offset: s.get('offset'),
+      limit: s.get('limit'),
+      oncesi: s.get('oncesi') || '',
+      q: s.get('q') || '',
+      tarih: s.get('tarih') || 'tumu',
+      bas: s.get('bas') || '',
+      bit: s.get('bit') || '',
+      is: s.get('is') || 'tumu',
+      kaynak: s.get('kaynak') || 'tumu',
+    }));
+  }
+
   if (yol === '/api/jobs' && req.method === 'POST') {
     if (!abonelikAktifMi()) return json(res, 402, { hata: 'Bakım desteği süresi doldu — yeni iş açılamıyor. Ayrıntı: header\'daki gün sayacı.' });
     const govde = await govdeOku(req);

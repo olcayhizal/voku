@@ -514,6 +514,53 @@ main { padding: 22px 20px 26px; max-width: 1360px; margin: 0 auto; }
   font-family: var(--mono); font-size: 11px; color: var(--paper-dim);
 }
 
+/* ---------------- iskelet (yükleniyor) ----------------
+   Banyo teması: karanlıkta yavaşça beliren negatif hissi — parlak shimmer
+   yerine loş bir nabız. */
+.iskelet-blok {
+  display: block;
+  background: var(--tray-2);
+  border-radius: 2px;
+  animation: iskelet-nabiz 1.6s ease-in-out infinite;
+}
+.job-satir.iskelet {
+  pointer-events: none;
+  border-left-color: var(--edge);
+  min-height: 66px;
+}
+.job-satir.iskelet .job-foto { border-color: var(--edge); height: 46px; }
+.iskelet-metin { height: 11px; }
+.iskelet-metin.genis { width: 72%; }
+.iskelet-metin.dar { width: 45%; }
+.detay-iskelet .input-onizleme { border: 1px solid var(--edge); }
+.detay-iskelet .tabaka-bilgi { display: grid; gap: 10px; align-content: center; flex: 1; }
+.detay-iskelet .iskelet-metin.genis { width: 240px; max-width: 60%; }
+.detay-iskelet .iskelet-metin.dar { width: 150px; max-width: 40%; }
+.iskelet-kareler {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 16px 18px;
+}
+.iskelet-kare { aspect-ratio: 3 / 4; }
+@keyframes iskelet-nabiz {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .iskelet-blok { animation: none; opacity: 0.8; } }
+
+/* Kuyruk alt çubuğu: yüklü/toplam sayacı + sayfa sayfa yükleme. */
+.kuyruk-alt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px 2px;
+}
+.kuyruk-sayac { font-family: var(--mono); font-size: 11px; color: var(--paper-dim); }
+.daha-fazla { flex: none; }
+.daha-fazla[disabled] { opacity: 0.6; cursor: default; }
+
 /* ---------------- tabaka (detay) ---------------- */
 .tabaka {
   background: var(--tray);

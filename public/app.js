@@ -5,7 +5,10 @@ const $$ = (s, kok = document) => [...kok.querySelectorAll(s)];
 
 const state = {
   platformlar: [],
-  joblar: [],
+  joblar: [], // yüklü pencere — kuyruk sunucudan sayfa sayfa gelir
+  jobToplam: 0, // aktif süzgeçlerle eşleşen toplam iş (sunucu sayar)
+  jobYukleniyor: false, // ilk sayfa/süzgeç yüklemesi (iskelet gösterilir)
+  jobDahaYukleniyor: false, // "daha fazla" düğmesi dönüyor
   promptlar: [],
   promptTaslak: [],
   seciliJob: null,
@@ -137,6 +140,70 @@ $$('.tab').forEach((tab) => {
 });
 
 /* ================= İŞLER ================= */
+const SAYFA_BOYU = 25;
+let isIstekSirasi = 0; // yavaş gelen eski yanıt yenisini ezmesin
+
+function suzgecAktifMi() {
+  return Boolean(state.arama) || state.tarih.tip !== 'tumu' ||
+    state.isSuzgec !== 'tumu' || state.kaynakSuzgec !== 'tumu';
+}
+
+function suzgecParametreleri() {
+  const p = new URLSearchParams();
+  if (state.arama) p.set('q', state.arama);
+  if (state.tarih.tip !== 'tumu') {
+    p.set('tarih', state.tarih.tip);
+    if (state.tarih.bas) p.set('bas', state.tarih.bas);
+    if (state.tarih.bit) p.set('bit', state.tarih.bit);
+  }
+  if (state.isSuzgec !== 'tumu') p.set('is', state.isSuzgec);
+  if (state.kaynakSuzgec !== 'tumu') p.set('kaynak', state.kaynakSuzgec);
+  return p;
+}
+
+/**
+ * Kuyruğu sunucudan sayfa sayfa çeker — panel artık tüm işleri tek seferde
+ * indirmez (aylar boyu iş × task detayı, tünelde ciddi bant genişliği).
+ * `ekle`: sonraki sayfayı en eski yüklü işten geriye ekler (cursor —
+ * canlı kuyrukta offset kayar). `tazele`: yüklü pencereyi aynı süzgeçlerle
+ * yerinde yeniler. İkisi de yoksa süzgeç değişmiştir, ilk sayfaya dönülür.
+ */
+async function isleriYukle({ ekle = false, tazele = false } = {}) {
+  const p = suzgecParametreleri();
+  p.set('limit', String(tazele ? Math.max(SAYFA_BOYU, state.joblar.length) : SAYFA_BOYU));
+  if (ekle) {
+    const enEski = state.joblar[state.joblar.length - 1];
+    if (enEski) p.set('oncesi', enEski.createdAt);
+  }
+  const istek = ++isIstekSirasi;
+  if (ekle) state.jobDahaYukleniyor = true;
+  else if (!tazele) state.jobYukleniyor = true;
+  jobListesiCiz();
+  try {
+    const sayfa = await api(`/api/jobs?${p}`);
+    if (istek !== isIstekSirasi) return; // daha yeni bir istek yolda
+    state.jobToplam = sayfa.toplam;
+    if (ekle) {
+      const eldekiler = new Set(state.joblar.map((j) => j.id));
+      state.joblar.push(...sayfa.joblar.filter((j) => !eldekiler.has(j.id)));
+    } else {
+      state.joblar = sayfa.joblar;
+    }
+    if (state.seciliJob && !state.joblar.some((j) => j.id === state.seciliJob)) {
+      state.seciliJob = state.joblar[0]?.id || null;
+      jobDetayCiz();
+    }
+  } catch {
+    /* ağ hatası: eldeki liste kalır; akış şeridi kopukluğu zaten gösterir */
+  } finally {
+    if (istek === isIstekSirasi) {
+      state.jobYukleniyor = false;
+      state.jobDahaYukleniyor = false;
+      jobListesiCiz();
+    }
+  }
+}
+
 /** Arama kutusu: kod, telefon, not ve prompt metinlerinde eşleşme arar. */
 function jobEsliyorMu(job, terim) {
   if (!terim) return true;
@@ -203,18 +270,36 @@ function kaynakEsliyorMu(job) {
   return (job.kaynak || 'panel') === state.kaynakSuzgec;
 }
 
+/** Yüklenirken satır yerine geçen iskelet — boş kutu bakakalmasın. */
+function iskeletSatir() {
+  return el('div', { class: 'job-satir iskelet', 'aria-hidden': 'true' },
+    el('span', { class: 'job-foto iskelet-blok' }),
+    el('span', { class: 'job-bilgi' },
+      el('span', { class: 'iskelet-blok iskelet-metin genis' }),
+      el('span', { class: 'iskelet-blok iskelet-metin dar' })
+    )
+  );
+}
+
 function jobListesiCiz() {
   const kap = $('#jobListesi');
   kap.replaceChildren();
-  const cokluIs = state.joblar.length > 1;
+  // Süzgeç kontrolleri toplam iş sayısına göre görünür — süzgeç 0 sonuç
+  // verince kaybolup kullanıcıyı kilitlemesin (temizleme imkânı kalsın).
+  const cokluIs = state.jobToplam > 1 || state.joblar.length > 1 || suzgecAktifMi();
   $('#kuyrukAra').classList.toggle('gizli', !cokluIs);
   $('#tarihSuzgec').classList.toggle('gizli', !cokluIs);
   $('#isSuzgec').classList.toggle('gizli', !cokluIs);
   // Kaynak süzgeci ancak iki kaynak da kuyrukta varsa anlamlı.
   const kaynakCesidi = new Set(state.joblar.map((j) => j.kaynak || 'panel')).size;
-  $('#kaynakSuzgec').classList.toggle('gizli', kaynakCesidi < 2);
+  $('#kaynakSuzgec').classList.toggle('gizli', kaynakCesidi < 2 && state.kaynakSuzgec === 'tumu');
 
-  if (!state.joblar.length) {
+  if (state.jobYukleniyor && !state.joblar.length) {
+    for (let i = 0; i < 6; i++) kap.append(iskeletSatir());
+    return;
+  }
+
+  if (!state.joblar.length && !suzgecAktifMi()) {
     kap.append(
       el('div', { class: 'bos' },
         el('p', { text: 'Kuyruk boş. Bir fotoğraf ver, hat çalışsın.' }),
@@ -296,6 +381,28 @@ function jobListesiCiz() {
     );
     kap.append(satir);
   }
+
+  // Alt çubuk: kaç iş yüklü / toplam kaç; kalan varsa sayfa sayfa çekilir.
+  const kalan = state.jobToplam - state.joblar.length;
+  if (kalan > 0 || state.jobDahaYukleniyor) {
+    kap.append(
+      el('div', { class: 'kuyruk-alt' },
+        el('span', { class: 'kuyruk-sayac', text: `${state.joblar.length} / ${state.jobToplam} iş` }),
+        el('button', {
+          class: 'btn btn-ikincil btn-kucuk daha-fazla',
+          disabled: state.jobDahaYukleniyor || null,
+          onclick: () => isleriYukle({ ekle: true }),
+          text: state.jobDahaYukleniyor ? 'yükleniyor…' : `Daha fazla yükle (${kalan})`,
+        })
+      )
+    );
+  } else if (state.jobToplam > SAYFA_BOYU) {
+    kap.append(
+      el('div', { class: 'kuyruk-alt' },
+        el('span', { class: 'kuyruk-sayac', text: `${state.joblar.length} / ${state.jobToplam} iş — hepsi yüklendi` })
+      )
+    );
+  }
 }
 
 /**
@@ -305,7 +412,10 @@ function jobListesiCiz() {
 function jobUpsert(veri) {
   const i = state.joblar.findIndex((j) => j.id === veri.id);
   if (i >= 0) state.joblar[i] = { ...state.joblar[i], ...veri };
-  else state.joblar.unshift(veri);
+  else {
+    state.joblar.unshift(veri);
+    state.jobToplam += 1; // sayaç bir sonraki tazelemeyi beklemesin
+  }
 }
 
 function jobSec(id) {
@@ -453,6 +563,24 @@ function jobDetayCiz() {
   kap.replaceChildren();
 
   if (!job) {
+    if (state.jobYukleniyor) {
+      // İlk yükleme: boş kutu yerine kontak baskısı iskeleti.
+      kap.append(
+        el('div', { class: 'detay-iskelet', 'aria-hidden': 'true' },
+          el('div', { class: 'tabaka-basi' },
+            el('span', { class: 'input-onizleme iskelet-blok' }),
+            el('div', { class: 'tabaka-bilgi' },
+              el('span', { class: 'iskelet-blok iskelet-metin genis' }),
+              el('span', { class: 'iskelet-blok iskelet-metin dar' })
+            )
+          ),
+          el('div', { class: 'iskelet-kareler' },
+            ...Array.from({ length: 4 }, () => el('span', { class: 'iskelet-blok iskelet-kare' }))
+          )
+        )
+      );
+      return;
+    }
     kap.append(
       el('div', { class: 'bos' },
         el('h3', { text: 'Kontak baskısı' }),
@@ -760,6 +888,7 @@ async function jobSil(id) {
   if (!confirm(`${id} silinsin mi? Üretilen görseller de gider.`)) return;
   await api(`/api/jobs/${id}`, { method: 'DELETE' });
   state.joblar = state.joblar.filter((j) => j.id !== id);
+  state.jobToplam = Math.max(0, state.jobToplam - 1);
   if (state.seciliJob === id) state.seciliJob = state.joblar[0]?.id || null;
   jobListesiCiz();
   jobDetayCiz();
@@ -787,9 +916,13 @@ function yeniIsAc() {
 
 $('#yeniIsAc').addEventListener('click', yeniIsAc);
 
+let aramaZamanlayici;
 $('#kuyrukAra').addEventListener('input', (e) => {
   state.arama = e.target.value.trim();
-  jobListesiCiz();
+  jobListesiCiz(); // yüklü pencere anında süzülür (hissiyat)
+  clearTimeout(aramaZamanlayici);
+  // Sunucu araması tüm kuyruğu tarar — yazma durunca tek istek.
+  aramaZamanlayici = setTimeout(() => isleriYukle(), 300);
 });
 
 const TARIH_ETIKET = { tumu: 'Tümü', bugun: 'Bugün', dun: 'Dün', aralik: 'seçili aralık' };
@@ -801,7 +934,7 @@ $('#isSuzgec').addEventListener('click', (e) => {
   for (const b of $$('#isSuzgec button')) {
     b.setAttribute('aria-pressed', String(b.dataset.durum === state.isSuzgec));
   }
-  jobListesiCiz();
+  isleriYukle();
 });
 
 $('#kaynakSuzgec').addEventListener('click', (e) => {
@@ -811,7 +944,7 @@ $('#kaynakSuzgec').addEventListener('click', (e) => {
   for (const b of $$('#kaynakSuzgec button')) {
     b.setAttribute('aria-pressed', String(b.dataset.kaynak === state.kaynakSuzgec));
   }
-  jobListesiCiz();
+  isleriYukle();
 });
 
 function suzgecleriTemizle() {
@@ -829,7 +962,7 @@ function suzgecleriTemizle() {
     b.setAttribute('aria-pressed', String(b.dataset.kaynak === 'tumu'));
   }
   tarihSegmentiCiz();
-  jobListesiCiz();
+  isleriYukle();
 }
 
 function tarihSegmentiCiz() {
@@ -852,7 +985,7 @@ $('#tarihSegment').addEventListener('click', (e) => {
     $('#tarihBit').value = bugun;
   }
   tarihSegmentiCiz();
-  jobListesiCiz();
+  isleriYukle();
 });
 
 for (const [id, alan] of [['#tarihBas', 'bas'], ['#tarihBit', 'bit']]) {
@@ -860,7 +993,7 @@ for (const [id, alan] of [['#tarihBas', 'bas'], ['#tarihBit', 'bit']]) {
     state.tarih[alan] = e.target.value;
     state.tarih.tip = 'aralik';
     tarihSegmentiCiz();
-    jobListesiCiz();
+    isleriYukle();
   });
 }
 
@@ -1997,9 +2130,8 @@ async function sayfaEylem(sayfaId, eylem, dugme) {
   }
   try {
     state.oda = await api(`/api/sayfa/${sayfaId}/${eylem}`, { method: 'POST' });
-    const durum = await api('/api/state');
-    state.joblar = durum.joblar;
-    jobListesiCiz();
+    // Baskı sayaçları değişti — yüklü kuyruk penceresini yerinde tazele.
+    await isleriYukle({ tazele: true });
     if (state.seciliJob) jobDetayCiz();
   } catch (e) {
     alert(e.message);
@@ -2147,7 +2279,9 @@ let sonTazeleme = 0;
 async function durumuTazele() {
   let durum;
   try {
-    durum = await api('/api/state');
+    // isler=0: kuyruk hariç durum — kuyruk ayrıca yüklü pencere kadar,
+    // aktif süzgeçlerle tazelenir (tam döküm bant genişliği yakıyordu).
+    durum = await api('/api/state?isler=0');
     sonTazeleme = Date.now();
   } catch {
     return; // sunucu kapalıysa akış hatası zaten görünüyor
@@ -2157,22 +2291,25 @@ async function durumuTazele() {
   state.disErisim = durum.disErisim || null;
   state.fal = durum.fal || null;
   state.abonelik = durum.abonelik || null;
-  state.joblar = durum.joblar;
-  // Seçili iş silinmişse ilk işe düş; duruyorsa seçim korunur.
-  if (state.seciliJob && !durum.joblar.some((j) => j.id === state.seciliJob)) {
-    state.seciliJob = durum.joblar[0]?.id || null;
-  }
-  jobListesiCiz();
-  jobDetayCiz();
   oturumlariCiz();
   // Baskı odası gizliyken de tazelenir: sekme rozeti (bekleyen kopya) güncel kalsın.
   odayiYukle();
+  await isleriYukle({ tazele: true }); // listeyi de çizer, seçim düşerse taşır
+  jobDetayCiz();
 }
 
 async function baslat() {
+  // Veri gelene kadar iskelet — boş kutulara bakılmasın.
+  state.jobYukleniyor = true;
+  jobListesiCiz();
+  jobDetayCiz();
+
+  // İlk sayfa /api/state ile tek istekte gelir (kuyruğun tamamı değil).
   const durum = await api('/api/state');
   state.platformlar = durum.platformlar;
   state.joblar = durum.joblar;
+  state.jobToplam = durum.jobToplam ?? durum.joblar.length;
+  state.jobYukleniyor = false;
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;
   state.seciliJob = durum.joblar[0]?.id || null;
