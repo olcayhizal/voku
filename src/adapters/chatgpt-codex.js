@@ -54,6 +54,59 @@ function codexCalistir(argumanlar, secenekler) {
 }
 
 /**
+ * Model seçimi — kendini iyileştiren zincir.
+ *
+ * OpenAI plan bazında Codex model erişimini haber vermeden değiştirebiliyor
+ * (2026-09: gpt-5.5 Plus hesaplardan kalktı, backend 404 "does not exist or
+ * you do not have access" döndürüyor; gpt-5.4 aynı hesaplarda çalışıyor).
+ * Sabit `-m` bu yüzden tüm üretimi kilitleyebilir: 404 gören model hesap
+ * bazında karalisteye alınır, sıradaki tercih denenir; hepsi biterse `-m`
+ * hiç geçilmez ve CLI kendi güncel varsayılanını kullanır.
+ */
+const MODEL_TERCIHLERI = ['gpt-5.5', 'gpt-5.4'];
+const olmayanModeller = new Set(); // "<codexHome>::<model>"
+
+function seciliModel(platform, codexHome) {
+  const adaylar = [platform?.model, ...MODEL_TERCIHLERI].filter(Boolean);
+  return adaylar.find((m) => !olmayanModeller.has(`${codexHome}::${m}`)) || null;
+}
+
+function modelArgumanlari(platform, codexHome) {
+  const model = seciliModel(platform, codexHome);
+  return model ? ['-m', model] : [];
+}
+
+function modelYokHatasiMi(e) {
+  const metin = `${e?.message || ''}\n${e?.tamCikti || ''}`;
+  // İki gerçek varyant: 404 "The model `x` does not exist or you do not have
+  // access to it." ve 400 "The 'x' model is not supported when using Codex
+  // with a ChatGPT account."
+  return /does not exist or you do not have access|model is not supported when using Codex/i.test(metin);
+}
+
+/**
+ * codexCalistir + model düşürme: argümanlar her denemede yeniden üretilir
+ * (argUret içinde modelArgumanlari çağrılmalı) — karaliste büyüyünce yeni
+ * liste otomatik olarak sıradaki modeli ya da `-m`'siz halini içerir.
+ */
+async function codexCalistirModelli(argUret, secenekler, platform, codexHome) {
+  for (;;) {
+    const model = seciliModel(platform, codexHome);
+    try {
+      return await codexCalistir(argUret(), secenekler);
+    } catch (e) {
+      if (!model || !modelYokHatasiMi(e)) throw e;
+      olmayanModeller.add(`${codexHome}::${model}`);
+      const sonraki = seciliModel(platform, codexHome);
+      log.warn(
+        `[chatgpt-codex] model '${model}' bu hesapta yok (OpenAI erişimi değiştirmiş) — ` +
+          (sonraki ? `'${sonraki}' ile yeniden deneniyor` : 'CLI varsayılan modeliyle sürülüyor')
+      );
+    }
+  }
+}
+
+/**
  * Codex çıktısından kullanım limiti hatası + reset zamanı çıkarır.
  * Codex limite çarpınca "usage limit reached … try again at 6:34 AM" ya da
  * "resets in 4h" gibi metin döndürüyor. Reset okunabilirse ms epoch,
@@ -172,7 +225,10 @@ function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin, codex
       }
       if (kod !== 0) {
         const son = (hata || cikti).trim().split('\n').slice(-4).join(' ');
-        return reddet(new Error(`Codex çıkış kodu ${kod}: ${son || 'çıktı yok'}`));
+        const e = new Error(`Codex çıkış kodu ${kod}: ${son || 'çıktı yok'}`);
+        // Hata sınıflandırma (örn. model-404) son 4 satırda görünmeyebilir.
+        e.tamCikti = (hata + '\n' + cikti).slice(-4000);
+        return reddet(e);
       }
       cozumle(cikti);
     });
@@ -464,10 +520,10 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     '-c', 'sandbox_workspace_write.network_access=true',
     '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([OUTPUT_DIR])}`,
   ];
-  // Varsayılan model gpt-5.5 (CLI varsayılanı 5.6-sol) — settings'te
-  // platform.model ile değiştirilebilir. Görseli image_gen ürettiği için
-  // kalite aynı; yöneten ajan 5.5.
-  ortakArgumanlar.push('-m', platform?.model || 'gpt-5.5');
+  // Model argümanı sabit değil: her denemede modelArgumanlari ile üretilir
+  // (gpt-5.5 → gpt-5.4 → CLI varsayılanı; bkz. codexCalistirModelli).
+  // Görseli image_gen ürettiği için kalite modelden bağımsız; yöneten ajan
+  // limit dostu en üst tercihte koşar. settings'te platform.model öncelikli.
   for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
     ortakArgumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
   }
@@ -492,14 +548,15 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     const sandboxKoku = path.resolve(outDir).startsWith(path.resolve(OUTPUT_DIR))
       ? OUTPUT_DIR
       : outDir;
-    ham = await codexCalistir(
-      [
+    ham = await codexCalistirModelli(
+      () => [
         'exec', '--skip-git-repo-check', '--json',
         '-C', sandboxKoku, '-s', 'workspace-write',
         '-i', path.resolve(imagePath),
-        ...ortakArgumanlar, '-',
+        ...modelArgumanlari(platform, codexHome), ...ortakArgumanlar, '-',
       ],
-      { timeoutMs: zamanAsimi, cwd: sandboxKoku, signal, stdin: gorev, codexHome }
+      { timeoutMs: zamanAsimi, cwd: sandboxKoku, signal, stdin: gorev, codexHome },
+      platform, codexHome
     );
     kayit.id = oturumKimligiCoz(ham);
     if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(0, 8)}… (bu prompt'un sonraki işleri buradan devam eder)`);
@@ -520,13 +577,14 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     ].join('\n');
     // --json: file_change event'leri üretilen dosyanın KESİN yolunu verir —
     // ortak klasör tahminine (yanlış eşleşme riski) gerek kalmaz.
-    ham = await codexCalistir(
-      [
+    ham = await codexCalistirModelli(
+      () => [
         'exec', 'resume', kayit.id, '--skip-git-repo-check', '--json',
         '-i', path.resolve(imagePath),
-        ...ortakArgumanlar, '-',
+        ...modelArgumanlari(platform, codexHome), ...ortakArgumanlar, '-',
       ],
-      { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
+      { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome },
+      platform, codexHome
     );
     log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(0, 8)}… → ${baseName}`);
   }
@@ -547,9 +605,13 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'o dosyanın tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
       `Mümkünse ayrıca dosyayı şu yola da kopyalamayı dene (izin yoksa atla): ${hedef}`,
     ].join('\n');
-    const kurtarmaHam = await codexCalistir(
-      ['exec', 'resume', kayit.id, '--skip-git-repo-check', '--json', ...ortakArgumanlar, '-'],
-      { timeoutMs: 120000, cwd: outDir, signal, stdin: kurtarmaGorev, codexHome }
+    const kurtarmaHam = await codexCalistirModelli(
+      () => [
+        'exec', 'resume', kayit.id, '--skip-git-repo-check', '--json',
+        ...modelArgumanlari(platform, codexHome), ...ortakArgumanlar, '-',
+      ],
+      { timeoutMs: 120000, cwd: outDir, signal, stdin: kurtarmaGorev, codexHome },
+      platform, codexHome
     );
     dosyalar = dosyalariTopla(kurtarmaHam, { outDir, baseName, oncesi, baslangic, hesap });
   }
@@ -593,7 +655,8 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     path.resolve(imagePath),
   ];
 
-  argumanlar.push('-m', platform?.model || 'gpt-5.5');
+  // Model argümanı çağrı anında eklenir (modelArgumanlari) — sabit `-m`
+  // hesapta olmayan modelde tüm üretimi kilitliyordu (bkz. codexCalistirModelli).
   for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
     argumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
   }
@@ -613,30 +676,27 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     if (semaKullan) {
       fs.writeFileSync(semaDosyasi, JSON.stringify(CIKTI_SEMASI));
       try {
-        ham = await codexCalistir(
-          [...argumanlar, '--output-schema', semaDosyasi, '-'],
-          { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome }
+        ham = await codexCalistirModelli(
+          () => [...argumanlar, ...modelArgumanlari(platform, codexHome), '--output-schema', semaDosyasi, '-'],
+          { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome },
+          platform, codexHome
         );
       } catch (e) {
         // Limit hatasını YUTMA — şemasız tekrar aynı hesapta yine dolu döner.
         if (e.limitDolu) throw e;
         if (!/text\.format\.schema|output.?schema|400/i.test(e.message)) throw e;
-        ham = await codexCalistir([...argumanlar, '-'], {
-          timeoutMs: zamanAsimi,
-          cwd: outDir,
-          signal,
-          stdin: gorev,
-          codexHome,
-        });
+        ham = await codexCalistirModelli(
+          () => [...argumanlar, ...modelArgumanlari(platform, codexHome), '-'],
+          { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome },
+          platform, codexHome
+        );
       }
     } else {
-      ham = await codexCalistir([...argumanlar, '-'], {
-        timeoutMs: zamanAsimi,
-        cwd: outDir,
-        signal,
-        stdin: gorev,
-        codexHome,
-      });
+      ham = await codexCalistirModelli(
+        () => [...argumanlar, ...modelArgumanlari(platform, codexHome), '-'],
+        { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome },
+        platform, codexHome
+      );
     }
   } finally {
     fs.rmSync(semaDosyasi, { force: true });
