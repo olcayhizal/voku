@@ -54,16 +54,16 @@ function codexCalistir(argumanlar, secenekler) {
 }
 
 /**
- * Model seçimi: varsayılan tercih gpt-5.5 — ÖLÇÜLÜ gerekçeyle (2026-09-09):
- * aynı hesapta tek üretim turu wham/usage 5-saatlik penceresinden CLI
- * varsayılan modeliyle %2, gpt-5.5 ile %1 yakıyor (token sayıları aynı;
- * fark model çarpanı). 5.5 bazı hesaplarda kaldırıldı (404) — o durumda
- * hesap bazında KALICI karalisteye (CODEX_HOME içinde dosya) yazılır ve
- * `-m`'siz devam edilir: restart'lar yeniden yoklama üretmez, 7 gün sonra
- * bir kez tazelenir (OpenAI geri açmış olabilir). settings'te platform.model
- * yazılırsa tercih odur.
+ * Model seçimi — ÖLÇÜLÜ gerekçeyle (2026-09-09, wham/usage 5-saatlik
+ * pencere, üretim turu başına): gpt-5.6-luna ~%0.33, gpt-5.5 ve
+ * gpt-5.6-terra %1, CLI varsayılanı (5.6-sol) %2. Görseli her durumda
+ * imagegen üretir — yöneten modelin kalite etkisi yok, çarpanı var.
+ * Tercih: luna → 5.5 → `-m`'siz. Hesapta olmayan model (404/400) KALICI
+ * karalisteye (CODEX_HOME/.voku-olmayan-modeller.json) yazılır: restart'lar
+ * yeniden yoklamaz, 7 gün sonra bir kez tazelenir. settings'te
+ * platform.model yazılırsa liste başına geçer.
  */
-const VARSAYILAN_MODEL = 'gpt-5.5';
+const MODEL_TERCIHLERI = ['gpt-5.6-luna', 'gpt-5.5'];
 const KARALISTE_TAZELEME_MS = 7 * 24 * 60 * 60 * 1000;
 const olmayanModeller = new Map(); // "<codexHome>::<model>" → ms epoch
 
@@ -96,11 +96,13 @@ function karalisteKaydet(codexHome) {
 }
 
 function seciliModel(platform, codexHome) {
-  const model = platform?.model || VARSAYILAN_MODEL;
   karalisteYukle(codexHome);
-  const zaman = olmayanModeller.get(`${codexHome}::${model}`);
-  if (zaman && Date.now() - zaman < KARALISTE_TAZELEME_MS) return null;
-  return model;
+  const adaylar = [platform?.model, ...MODEL_TERCIHLERI].filter(Boolean);
+  for (const model of adaylar) {
+    const zaman = olmayanModeller.get(`${codexHome}::${model}`);
+    if (!zaman || Date.now() - zaman >= KARALISTE_TAZELEME_MS) return model;
+  }
+  return null;
 }
 
 function modelArgumanlari(platform, codexHome) {
@@ -130,8 +132,11 @@ async function codexCalistirModelli(argUret, secenekler, platform, codexHome) {
       if (!model || !modelYokHatasiMi(e)) throw e;
       olmayanModeller.set(`${codexHome}::${model}`, Date.now());
       karalisteKaydet(codexHome);
+      const sonraki = seciliModel(platform, codexHome);
       log.warn(
-        `[chatgpt-codex] model '${model}' bu hesapta yok — CLI varsayılanıyla sürülüyor (7 gün sonra bir kez yeniden denenir)`
+        `[chatgpt-codex] model '${model}' bu hesapta yok — ` +
+          (sonraki ? `'${sonraki}' ile sürülüyor` : 'CLI varsayılanıyla sürülüyor') +
+          ' (karaliste kalıcı; 7 gün sonra bir kez yeniden denenir)'
       );
     }
   }
