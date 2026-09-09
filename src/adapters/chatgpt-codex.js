@@ -345,6 +345,31 @@ const sohbetler = new Map(); // "hesap::promptId::promptOzeti" → [{ id, tur, a
 // Hesap (CODEX_HOME) başına süren üretim sayısı: generated_images yedek
 // yolunun paralel üretim sırasında BAŞKA task'ın görselini kapmaması için
 // (kare 01'e kare 04'ün görselinin yazılması bu yüzdendi).
+/**
+ * Yeni Codex (0.15x) görselleri workspace'e yazmıyor (file_change eventi de
+ * yok): imagegen skill'i çıktıyı generated_images/<thread_id>/exec-*.png
+ * altına bırakıyor. Klasör sohbete özel olduğundan buradan okumak PARALEL
+ * üretimde bile kesin eşleşmedir — ortak-klasör çapraz kapma riski yok.
+ */
+function sohbetCiktilari(threadId, baslangicZamani, hesap) {
+  if (!threadId) return [];
+  const dizin = path.join(codexKoku(hesap), 'generated_images', threadId);
+  let girisler;
+  try {
+    girisler = fs.readdirSync(dizin);
+  } catch {
+    return []; // klasör yok: eski CLI ya da üretim yapılmadı
+  }
+  const bulunan = [];
+  for (const ad of girisler) {
+    if (!/\.(png|jpe?g|webp)$/i.test(ad)) continue;
+    const tam = path.join(dizin, ad);
+    const st = fs.statSync(tam);
+    if (st.mtimeMs >= baslangicZamani) bulunan.push({ yol: tam, zaman: st.mtimeMs });
+  }
+  return bulunan.sort((a, b) => a.zaman - b.zaman).map((x) => x.yol);
+}
+
 const aktifUretimler = new Map(); // codexHome → sayı
 
 function uretimSayaci(home, fark) {
@@ -480,7 +505,7 @@ async function sohbetteUret(girdi, kayit) {
   // ama bir kereliğine — sonraki turlar yine önbellekten gelir).
   const sinir = Number(girdi.platform?.sohbetTurSiniri) || 12;
   if (kayit.id && kayit.tur >= sinir) {
-    log.info(`[chatgpt-codex] sohbet ${kayit.id.slice(0, 8)}… ${kayit.tur} tura ulaştı — taze sohbet açılıyor`);
+    log.info(`[chatgpt-codex] sohbet ${kayit.id.slice(-8)} ${kayit.tur} tura ulaştı — taze sohbet açılıyor`);
     kayit.id = null;
     kayit.tur = 0;
   }
@@ -557,7 +582,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       platform, codexHome
     );
     kayit.id = oturumKimligiCoz(ham);
-    if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(0, 8)}… (bu prompt'un sonraki işleri buradan devam eder)`);
+    if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(-8)} (bu prompt'un sonraki işleri buradan devam eder)`);
     else log.warn('[chatgpt-codex] oturum kimliği okunamadı — sonraki tur yeni sohbet açacak');
     if (process.env.VOKU_CODEX_DEBUG) {
       fs.writeFileSync(path.join(outDir, `.codex-ham-${baseName}.log`), ham);
@@ -584,12 +609,12 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       { timeoutMs: zamanAsimi, cwd: outDir, signal, stdin: gorev, codexHome },
       platform, codexHome
     );
-    log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(0, 8)}… → ${baseName}`);
+    log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(-8)} → ${baseName}`);
   }
 
   let dosyalar;
   try {
-    dosyalar = dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+    dosyalar = dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap, threadId: kayit.id });
   } catch (e) {
     if (!kayit.id || e.limitDolu || signal?.aborted) throw e;
     // Üretim büyük olasılıkla TAMAM ama dosya izlenemedi (Windows'ta Codex
@@ -611,7 +636,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       { timeoutMs: 120000, cwd: outDir, signal, stdin: kurtarmaGorev, codexHome },
       platform, codexHome
     );
-    dosyalar = dosyalariTopla(kurtarmaHam, { outDir, baseName, oncesi, baslangic, hesap });
+    dosyalar = dosyalariTopla(kurtarmaHam, { outDir, baseName, oncesi, baslangic, hesap, threadId: kayit.id });
   }
   kayit.tur += 1;
   return dosyalar;
@@ -700,7 +725,12 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     fs.rmSync(semaDosyasi, { force: true });
   }
 
-  return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap });
+  // --ephemeral oturum diske yazılmaz ama thread id yine üretilir ve
+  // görseller generated_images/<id>/ altına düşer — akıştan çözüp geçiriyoruz.
+  return dosyalariTopla(ham, {
+    outDir, baseName, oncesi, baslangic, hesap,
+    threadId: oturumKimligiCoz(ham),
+  });
 }
 
 /**
@@ -765,7 +795,7 @@ function bildirilenYollar(ham, outDir) {
 }
 
 /** Codex çıktısından üretilen dosyaları bulur, gerekirse iş klasörüne taşır. */
-export function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap }) {
+export function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap, threadId }) {
   const yollar = new Set();
 
   // 0a) Agent'ın "CIKTI:" satırıyla bildirdiği yollar — sohbet kendi
@@ -774,8 +804,15 @@ export function dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap
     if (fs.existsSync(y) && !oncesi.has(path.basename(y))) yollar.add(y);
   }
 
-  // 0) --json akışının file_change kayıtları: bu turda yazılan dosyaların
-  // KESİN yolları — varsa tahmine (yol 2/3) hiç gerek kalmaz.
+  // 0b) Sohbetin KENDİ generated_images/<thread_id>/ klasörü (yeni Codex):
+  // agent CIKTI satırını unutsa bile dosya buradadır; klasör bize özel
+  // olduğundan paralelde de güvenli. Bir turda tek görsel → en yenisi.
+  if (!yollar.size) {
+    for (const y of sohbetCiktilari(threadId, baslangic, hesap).slice(-1)) yollar.add(y);
+  }
+
+  // 0c) --json akışının file_change kayıtları (eski Codex sürümleri):
+  // bu turda workspace'e yazılan dosyaların kesin yolları.
   for (const y of jsonlDosyaYollari(ham, outDir)) {
     if (fs.existsSync(y) && !oncesi.has(path.basename(y))) yollar.add(y);
   }
