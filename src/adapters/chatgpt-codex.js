@@ -54,21 +54,52 @@ function codexCalistir(argumanlar, secenekler) {
 }
 
 /**
- * Model seçimi: varsayılan `-m`'SİZ — CLI kendi güncel varsayılanını kullanır.
- *
- * Ders (2026-09): OpenAI plan bazında model erişimini haber vermeden
- * değiştiriyor (gpt-5.5/5.4 Plus hesaplardan kalktı, 404 döndü). Sabit
- * tercih listesi (5.5→5.4) her panel açılışında hesap başına iki başarısız
- * yoklama harcıyordu — karaliste süreç belleğinde olduğundan her yeniden
- * başlatmada (otomatik güncelleme dahil) tekrarlanıyordu. Model adı artık
- * yalnız settings'te platform.model açıkça yazılırsa geçilir; o da 404
- * verirse hesap bazında karalisteye alınır ve `-m`'siz devam edilir.
+ * Model seçimi: varsayılan tercih gpt-5.5 — ÖLÇÜLÜ gerekçeyle (2026-09-09):
+ * aynı hesapta tek üretim turu wham/usage 5-saatlik penceresinden CLI
+ * varsayılan modeliyle %2, gpt-5.5 ile %1 yakıyor (token sayıları aynı;
+ * fark model çarpanı). 5.5 bazı hesaplarda kaldırıldı (404) — o durumda
+ * hesap bazında KALICI karalisteye (CODEX_HOME içinde dosya) yazılır ve
+ * `-m`'siz devam edilir: restart'lar yeniden yoklama üretmez, 7 gün sonra
+ * bir kez tazelenir (OpenAI geri açmış olabilir). settings'te platform.model
+ * yazılırsa tercih odur.
  */
-const olmayanModeller = new Set(); // "<codexHome>::<model>"
+const VARSAYILAN_MODEL = 'gpt-5.5';
+const KARALISTE_TAZELEME_MS = 7 * 24 * 60 * 60 * 1000;
+const olmayanModeller = new Map(); // "<codexHome>::<model>" → ms epoch
+
+function karalisteDosyasi(codexHome) {
+  return path.join(codexHome, '.voku-olmayan-modeller.json');
+}
+
+function karalisteYukle(codexHome) {
+  if ([...olmayanModeller.keys()].some((k) => k.startsWith(`${codexHome}::`))) return;
+  try {
+    const kayit = JSON.parse(fs.readFileSync(karalisteDosyasi(codexHome), 'utf8'));
+    for (const [model, zaman] of Object.entries(kayit)) {
+      olmayanModeller.set(`${codexHome}::${model}`, Number(zaman) || 0);
+    }
+  } catch {
+    /* dosya yoksa karaliste boş */
+  }
+}
+
+function karalisteKaydet(codexHome) {
+  const kayit = {};
+  for (const [k, zaman] of olmayanModeller) {
+    if (k.startsWith(`${codexHome}::`)) kayit[k.slice(codexHome.length + 2)] = zaman;
+  }
+  try {
+    fs.writeFileSync(karalisteDosyasi(codexHome), JSON.stringify(kayit, null, 2) + '\n');
+  } catch {
+    /* yazılamazsa süreç içi karaliste yeter */
+  }
+}
 
 function seciliModel(platform, codexHome) {
-  const model = platform?.model;
-  if (!model || olmayanModeller.has(`${codexHome}::${model}`)) return null;
+  const model = platform?.model || VARSAYILAN_MODEL;
+  karalisteYukle(codexHome);
+  const zaman = olmayanModeller.get(`${codexHome}::${model}`);
+  if (zaman && Date.now() - zaman < KARALISTE_TAZELEME_MS) return null;
   return model;
 }
 
@@ -97,9 +128,10 @@ async function codexCalistirModelli(argUret, secenekler, platform, codexHome) {
       return await codexCalistir(argUret(), secenekler);
     } catch (e) {
       if (!model || !modelYokHatasiMi(e)) throw e;
-      olmayanModeller.add(`${codexHome}::${model}`);
+      olmayanModeller.set(`${codexHome}::${model}`, Date.now());
+      karalisteKaydet(codexHome);
       log.warn(
-        `[chatgpt-codex] settings'teki model '${model}' bu hesapta yok — CLI varsayılan modeliyle sürülüyor`
+        `[chatgpt-codex] model '${model}' bu hesapta yok — CLI varsayılanıyla sürülüyor (7 gün sonra bir kez yeniden denenir)`
       );
     }
   }
