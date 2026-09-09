@@ -54,21 +54,22 @@ function codexCalistir(argumanlar, secenekler) {
 }
 
 /**
- * Model seçimi — kendini iyileştiren zincir.
+ * Model seçimi: varsayılan `-m`'SİZ — CLI kendi güncel varsayılanını kullanır.
  *
- * OpenAI plan bazında Codex model erişimini haber vermeden değiştirebiliyor
- * (2026-09: gpt-5.5 Plus hesaplardan kalktı, backend 404 "does not exist or
- * you do not have access" döndürüyor; gpt-5.4 aynı hesaplarda çalışıyor).
- * Sabit `-m` bu yüzden tüm üretimi kilitleyebilir: 404 gören model hesap
- * bazında karalisteye alınır, sıradaki tercih denenir; hepsi biterse `-m`
- * hiç geçilmez ve CLI kendi güncel varsayılanını kullanır.
+ * Ders (2026-09): OpenAI plan bazında model erişimini haber vermeden
+ * değiştiriyor (gpt-5.5/5.4 Plus hesaplardan kalktı, 404 döndü). Sabit
+ * tercih listesi (5.5→5.4) her panel açılışında hesap başına iki başarısız
+ * yoklama harcıyordu — karaliste süreç belleğinde olduğundan her yeniden
+ * başlatmada (otomatik güncelleme dahil) tekrarlanıyordu. Model adı artık
+ * yalnız settings'te platform.model açıkça yazılırsa geçilir; o da 404
+ * verirse hesap bazında karalisteye alınır ve `-m`'siz devam edilir.
  */
-const MODEL_TERCIHLERI = ['gpt-5.5', 'gpt-5.4'];
 const olmayanModeller = new Set(); // "<codexHome>::<model>"
 
 function seciliModel(platform, codexHome) {
-  const adaylar = [platform?.model, ...MODEL_TERCIHLERI].filter(Boolean);
-  return adaylar.find((m) => !olmayanModeller.has(`${codexHome}::${m}`)) || null;
+  const model = platform?.model;
+  if (!model || olmayanModeller.has(`${codexHome}::${model}`)) return null;
+  return model;
 }
 
 function modelArgumanlari(platform, codexHome) {
@@ -97,10 +98,8 @@ async function codexCalistirModelli(argUret, secenekler, platform, codexHome) {
     } catch (e) {
       if (!model || !modelYokHatasiMi(e)) throw e;
       olmayanModeller.add(`${codexHome}::${model}`);
-      const sonraki = seciliModel(platform, codexHome);
       log.warn(
-        `[chatgpt-codex] model '${model}' bu hesapta yok (OpenAI erişimi değiştirmiş) — ` +
-          (sonraki ? `'${sonraki}' ile yeniden deneniyor` : 'CLI varsayılan modeliyle sürülüyor')
+        `[chatgpt-codex] settings'teki model '${model}' bu hesapta yok — CLI varsayılan modeliyle sürülüyor`
       );
     }
   }
@@ -520,10 +519,9 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     '-c', 'sandbox_workspace_write.network_access=true',
     '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([OUTPUT_DIR])}`,
   ];
-  // Model argümanı sabit değil: her denemede modelArgumanlari ile üretilir
-  // (gpt-5.5 → gpt-5.4 → CLI varsayılanı; bkz. codexCalistirModelli).
-  // Görseli image_gen ürettiği için kalite modelden bağımsız; yöneten ajan
-  // limit dostu en üst tercihte koşar. settings'te platform.model öncelikli.
+  // Model argümanı yalnız settings'te platform.model varsa geçilir; yoksa
+  // CLI varsayılanı (bkz. seciliModel). Görseli image_gen ürettiği için
+  // kalite yöneten modelden bağımsız.
   for (const [anahtar, deger] of Object.entries(platform?.codexConfig || {})) {
     ortakArgumanlar.push('-c', `${anahtar}=${JSON.stringify(deger)}`);
   }
