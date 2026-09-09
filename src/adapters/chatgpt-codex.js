@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { OUTPUT_DIR } from '../paths.js';
+import { OUTPUT_DIR, ROOT } from '../paths.js';
 import { komutCagrisi } from '../platform.js';
 import { log } from '../logger.js';
 
@@ -407,6 +407,92 @@ function sohbetCiktilari(threadId, baslangicZamani, hesap) {
   return bulunan.sort((a, b) => a.zaman - b.zaman).map((x) => x.yol);
 }
 
+/* ---------------- maliyet telemetrisi ----------------
+ * "1 iş neden %X limit yaktı?" sorusu tahminle değil kayıtla cevaplanır:
+ * her Codex turu logs/codex-maliyet.jsonl'e bir satır yazar — token'lar,
+ * agent'ın koştuğu komut/imagegen sayısı, üretilen görsel sayısı, süre ve
+ * turdan hemen sonraki wham/usage yüzdeleri. Panelden /api/debug/maliyet
+ * ile okunur. Telemetri hatası üretimi asla durdurmaz.
+ */
+const MALIYET_DOSYASI = path.join(ROOT, 'logs', 'codex-maliyet.jsonl');
+
+/** JSONL akışından turun karnesini çıkarır. */
+function hamAnaliz(ham) {
+  const a = { turnlar: 0, komutlar: 0, imagegen: 0, mesajlar: 0, akilYurutme: 0,
+    tokens: { in: 0, cache: 0, out: 0, reason: 0 } };
+  for (const satir of String(ham || '').split('\n')) {
+    const t = satir.trim();
+    if (!t.startsWith('{')) continue;
+    let o;
+    try { o = JSON.parse(t); } catch { continue; }
+    if (o.type === 'turn.completed' && o.usage) {
+      a.turnlar += 1;
+      a.tokens.in += o.usage.input_tokens || 0;
+      a.tokens.cache += o.usage.cached_input_tokens || 0;
+      a.tokens.out += o.usage.output_tokens || 0;
+      a.tokens.reason += o.usage.reasoning_output_tokens || 0;
+    }
+    if (o.type !== 'item.completed') continue;
+    const it = o.item || {};
+    if (it.type === 'agent_message') a.mesajlar += 1;
+    else if (it.type === 'reasoning') a.akilYurutme += 1;
+    else if (it.type === 'command_execution') {
+      a.komutlar += 1;
+      if (/imagegen|image_gen/i.test(String(it.command || ''))) a.imagegen += 1;
+    }
+  }
+  return a;
+}
+
+/** wham/usage'ı cache'siz okur — turdan hemen sonraki gerçek yüzdeler. */
+async function anlikYuzdeler(codexHome) {
+  try {
+    const auth = JSON.parse(fs.readFileSync(path.join(codexHome, 'auth.json'), 'utf8'));
+    const y = await fetch('https://chatgpt.com/backend-api/wham/usage', {
+      headers: { authorization: `Bearer ${auth?.tokens?.access_token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const d = await y.json();
+    return {
+      saatlik: d.rate_limit?.primary_window?.used_percent ?? null,
+      haftalik: d.rate_limit?.secondary_window?.used_percent ?? null,
+    };
+  } catch {
+    return { saatlik: null, haftalik: null };
+  }
+}
+
+/** Tur karnesini diske yazar (fire-and-forget; hata yutulur). */
+async function telemetriKaydet(ham, { islem, hesap, promptId, baseName, platform, threadId, baslangic, sureMs, hata }) {
+  try {
+    const codexHome = codexKoku(hesap);
+    const kayit = {
+      t: new Date().toISOString(),
+      islem, // ilk-tur | devam | kurtarma | tek-seferlik
+      hesap: hesap?.ad || 'varsayılan',
+      promptId: promptId || null,
+      baseName,
+      model: seciliModel(platform, codexHome) || '(cli-varsayılanı)',
+      threadId: threadId ? threadId.slice(-8) : null,
+      sureSn: Math.round((sureMs || 0) / 100) / 10,
+      ...hamAnaliz(ham),
+      gorseller: sohbetCiktilari(threadId, baslangic || 0, hesap).length,
+      hata: hata ? String(hata).slice(0, 120) : undefined,
+      ...(await anlikYuzdeler(codexHome)),
+    };
+    fs.mkdirSync(path.dirname(MALIYET_DOSYASI), { recursive: true });
+    // Basit rotasyon: 5MB'ı aşınca eskisi .1'e döner (tek yedek yeter).
+    try {
+      if (fs.statSync(MALIYET_DOSYASI).size > 5 * 1024 * 1024) {
+        fs.renameSync(MALIYET_DOSYASI, MALIYET_DOSYASI + '.1');
+      }
+    } catch { /* dosya henüz yok */ }
+    fs.appendFileSync(MALIYET_DOSYASI, JSON.stringify(kayit) + '\n');
+  } catch {
+    /* telemetri üretimi durdurmaz */
+  }
+}
+
 const aktifUretimler = new Map(); // codexHome → sayı
 
 function uretimSayaci(home, fark) {
@@ -563,7 +649,7 @@ async function sohbetteUret(girdi, kayit) {
 }
 
 /** Sohbet modunda tek tur: ilk tur oturumu açar, sonrakiler devam ettirir. */
-async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }, kayit, ilkMi) {
+async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap, promptId }, kayit, ilkMi) {
   fs.mkdirSync(outDir, { recursive: true });
   const oncesi = gorselDosyalari(outDir);
   const baslangic = Date.now() - 1000;
@@ -589,6 +675,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
   }
 
   let ham;
+  const turBasi = Date.now();
   if (ilkMi) {
     const gorev = [
       'Görsel üret. Kod yazma, dosya analizi yapma, açıklama yapma — sadece görsel üretimi.',
@@ -598,6 +685,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'İSTENEN GÖRSEL:',
       prompt,
       '',
+      'Görseli TEK imagegen çağrısıyla üret — deneme/iyileştirme için yeniden ÜRETME (her çağrı kota yakar).',
       'Üretilen dosyayı TAŞIMA, KOPYALAMA, yeniden adlandırma — dosya işleri bizde.',
       'Üretim bitince görsel dosyasının tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
     ].join('\n');
@@ -621,6 +709,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
     kayit.id = oturumKimligiCoz(ham);
     if (kayit.id) log.info(`[chatgpt-codex] sohbet açıldı: ${kayit.id.slice(-8)} (bu prompt'un sonraki işleri buradan devam eder)`);
     else log.warn('[chatgpt-codex] oturum kimliği okunamadı — sonraki tur yeni sohbet açacak');
+    telemetriKaydet(ham, { islem: 'ilk-tur', hesap, promptId, baseName, platform, threadId: kayit.id, baslangic, sureMs: Date.now() - turBasi });
     if (process.env.VOKU_CODEX_DEBUG) {
       fs.writeFileSync(path.join(outDir, `.codex-ham-${baseName}.log`), ham);
     }
@@ -632,6 +721,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'İSTENEN GÖRSEL:',
       prompt,
       '',
+      'Görseli TEK imagegen çağrısıyla üret — deneme/iyileştirme için yeniden ÜRETME (her çağrı kota yakar).',
       'Üretilen dosyayı TAŞIMA, KOPYALAMA, yeniden adlandırma — dosya işleri bizde.',
       'Üretim bitince görsel dosyasının tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
     ].join('\n');
@@ -647,6 +737,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       platform, codexHome
     );
     log.info(`[chatgpt-codex] sohbetten devam (${kayit.tur + 1}. tur): ${kayit.id.slice(-8)} → ${baseName}`);
+    telemetriKaydet(ham, { islem: 'devam', hesap, promptId, baseName, platform, threadId: kayit.id, baslangic, sureMs: Date.now() - turBasi });
   }
 
   let dosyalar;
@@ -665,6 +756,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       'o dosyanın tam (mutlak) yolunu tek satırda şu biçimde yaz: CIKTI: <yol>',
       `Mümkünse ayrıca dosyayı şu yola da kopyalamayı dene (izin yoksa atla): ${hedef}`,
     ].join('\n');
+    const kurtarmaBasi = Date.now();
     const kurtarmaHam = await codexCalistirModelli(
       () => [
         'exec', 'resume', kayit.id, '--skip-git-repo-check', '--json',
@@ -673,6 +765,7 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
       { timeoutMs: 120000, cwd: outDir, signal, stdin: kurtarmaGorev, codexHome },
       platform, codexHome
     );
+    telemetriKaydet(kurtarmaHam, { islem: 'kurtarma', hesap, promptId, baseName, platform, threadId: kayit.id, baslangic, sureMs: Date.now() - kurtarmaBasi, hata: e.message });
     dosyalar = dosyalariTopla(kurtarmaHam, { outDir, baseName, oncesi, baslangic, hesap, threadId: kayit.id });
   }
   kayit.tur += 1;
@@ -680,10 +773,11 @@ async function turCalistir({ imagePath, prompt, outDir, baseName, ayarlar, platf
 }
 
 /** Eski davranış (sohbetModu:false): her kare kendi tek seferlik oturumunda. */
-async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap }) {
+async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, platform, signal, hesap, promptId }) {
   fs.mkdirSync(outDir, { recursive: true });
   const oncesi = gorselDosyalari(outDir);
   const baslangic = Date.now() - 1000;
+  const turBasi = Date.now();
   const hedef = path.join(outDir, `${baseName}.png`);
   const codexHome = codexKoku(hesap);
 
@@ -694,6 +788,7 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
     'İSTENEN GÖRSEL:',
     prompt,
     '',
+    'Görseli TEK imagegen çağrısıyla üret — deneme/iyileştirme için yeniden ÜRETME (her çağrı kota yakar).',
     `Üretilen görseli tam olarak şu yola kaydet: ${hedef}`,
     'Sonuç olarak kaydettiğin dosyaların mutlak yollarını döndür.',
   ].join('\n');
@@ -764,10 +859,9 @@ async function tekSeferlikUret({ imagePath, prompt, outDir, baseName, ayarlar, p
 
   // --ephemeral oturum diske yazılmaz ama thread id yine üretilir ve
   // görseller generated_images/<id>/ altına düşer — akıştan çözüp geçiriyoruz.
-  return dosyalariTopla(ham, {
-    outDir, baseName, oncesi, baslangic, hesap,
-    threadId: oturumKimligiCoz(ham),
-  });
+  const threadId = oturumKimligiCoz(ham);
+  telemetriKaydet(ham, { islem: 'tek-seferlik', hesap, promptId, baseName, platform, threadId, baslangic, sureMs: Date.now() - turBasi });
+  return dosyalariTopla(ham, { outDir, baseName, oncesi, baslangic, hesap, threadId });
 }
 
 /**

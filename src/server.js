@@ -627,6 +627,62 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     return;
   }
 
+  // --- debug: uzaktan teşhis uçları ---
+  // Maliyet telemetrisi: her Codex turunun karnesi (token, imagegen sayısı,
+  // üretilen görsel, süre, turdan sonraki limit yüzdeleri). Kayıt kaynağı:
+  // adapters/chatgpt-codex.js > telemetriKaydet → logs/codex-maliyet.jsonl.
+  if (yol === '/api/debug/maliyet' && req.method === 'GET') {
+    const n = Math.min(2000, Number(url.searchParams.get('n')) || 200);
+    let kayitlar = [];
+    try {
+      kayitlar = fs.readFileSync(path.join(ROOT, 'logs', 'codex-maliyet.jsonl'), 'utf8')
+        .trim().split('\n').slice(-n)
+        .map((s) => { try { return JSON.parse(s); } catch { return null; } })
+        .filter(Boolean);
+    } catch { /* henüz kayıt yok */ }
+    const ozet = {};
+    for (const k of kayitlar) {
+      const o = (ozet[k.islem] ||= {
+        adet: 0, hatali: 0, tokenIn: 0, tokenOut: 0, imagegen: 0, gorseller: 0, komutlar: 0, sureSn: 0,
+      });
+      o.adet += 1;
+      if (k.hata) o.hatali += 1;
+      o.tokenIn += k.tokens?.in || 0;
+      o.tokenOut += k.tokens?.out || 0;
+      o.imagegen += k.imagegen || 0;
+      o.gorseller += k.gorseller || 0;
+      o.komutlar += k.komutlar || 0;
+      o.sureSn += k.sureSn || 0;
+    }
+    const son = kayitlar[kayitlar.length - 1] || null;
+    return json(res, 200, {
+      aciklama: 'Turdan sonraki saatlik/haftalik alanları wham/usage yüzdeleridir; ardışık kayıtların farkı aradaki harcamadır. imagegen = agent kaç kez görsel ürettirdi (asıl kota bunu sayar).',
+      toplamKayit: kayitlar.length,
+      son: son && { t: son.t, saatlik: son.saatlik, haftalik: son.haftalik },
+      ozet,
+      kayitlar,
+    });
+  }
+
+  // Ham panel logu (logs/voku.log) — son n satır, düz metin. Canlı akış için
+  // /api/events (SSE) zaten log yayınlar.
+  if (yol === '/api/debug/log' && req.method === 'GET') {
+    const n = Math.min(5000, Number(url.searchParams.get('n')) || 500);
+    let metin = '(log dosyası yok)';
+    try {
+      const dosya = path.join(ROOT, 'logs', 'voku.log');
+      const st = fs.statSync(dosya);
+      const boyut = Math.min(st.size, 4 * 1024 * 1024); // dev dosyada sondan oku
+      const fd = fs.openSync(dosya, 'r');
+      const tampon = Buffer.alloc(boyut);
+      fs.readSync(fd, tampon, 0, boyut, st.size - boyut);
+      fs.closeSync(fd);
+      metin = tampon.toString('utf8').trim().split('\n').slice(-n).join('\n');
+    } catch { /* dosya yoksa mesaj kalır */ }
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(metin);
+  }
+
   // --- baskı odası ---
   if (yol === '/api/baski-odasi' && req.method === 'GET') {
     return json(res, 200, odaOzeti());
