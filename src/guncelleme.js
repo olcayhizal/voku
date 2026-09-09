@@ -65,6 +65,15 @@ function durumuYaz(d) {
   return d;
 }
 
+/** Diskteki HEAD (tam hash) — süreç-eski-mi tespiti için. */
+export async function yerelSurum() {
+  try {
+    return await git('rev-parse', 'HEAD');
+  } catch {
+    return null;
+  }
+}
+
 /** Bu klasör bir git deposu ve uzak adresi var mı? */
 export async function depoMu() {
   try {

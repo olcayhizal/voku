@@ -27,7 +27,7 @@ import * as codexAdaptoru from './adapters/chatgpt-codex.js';
 import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
-import { guncellemeAyarlari, guncellemeVarMi, guncelle } from './guncelleme.js';
+import { guncellemeAyarlari, guncellemeVarMi, guncelle, yerelSurum } from './guncelleme.js';
 import { lisansTazele, durum as abonelikDurumu, aktifMi as abonelikAktifMi } from './abonelik.js';
 import { havuzOzeti, uygunHesapVar, dinlenmeyiKaldir } from './havuz.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
@@ -1166,8 +1166,16 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     // yaşadığı doğrulanır, ANCAK ONDAN SONRA bu süreç kapanır. Çocuk hemen
     // ölürse restart iptal: panel eski sürümle ayakta kalır — hiçbir durumda
     // panelsiz (dışarıdan 502) kalınmaz.
-    fs.mkdirSync(path.join(ROOT, 'logs'), { recursive: true });
-    const kayit = fs.openSync(path.join(ROOT, 'logs', 'panel.out'), 'a');
+    // Windows: eski süreç panel.out'u kilitli tutabiliyor (EBUSY) ve bu tek
+    // satır tüm restart'ı aylarca kırdı — çıktı yakalamak restart'tan değerli
+    // değil, açılamazsa 'ignore' ile devam (logger zaten voku.log'a yazıyor).
+    let kayit = 'ignore';
+    try {
+      fs.mkdirSync(path.join(ROOT, 'logs'), { recursive: true });
+      kayit = fs.openSync(path.join(ROOT, 'logs', 'panel.out'), 'a');
+    } catch {
+      /* kilitliyse çıktısız başlat */
+    }
     // Mac'te panel caffeinate ile sarılı başlatılır (uyku engeli) — restart
     // bu sarmalayıcıyı korusun; diğer platformlarda düz node.
     const [komut, onArgumanlar] =
@@ -1215,6 +1223,13 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
   };
 
   let sonGuncellemeHatasi = null;
+  // Bu SÜRECİN doğduğu andaki kod sürümü. Restart yarım kalırsa (örn. eski
+  // Windows'larda panel.out EBUSY) pull yapılmış ama süreç eski kodla koşar
+  // durumda kalıyordu — sonraki turlar "zaten güncel" deyip geçiyordu.
+  // Diskteki HEAD ile karşılaştırıp limboyu her turda yakalar, restart'ı
+  // yeniden deneriz.
+  let surecSurumu = null;
+  yerelSurum().then((v) => { surecSurumu = v; }).catch(() => {});
   const guncellemeAralik = Number(process.env.VOKU_GUNCELLEME_ARALIK_MS) || 15 * 60 * 1000;
   const guncellemeBekcisi = setInterval(async () => {
     if (!guncellemeAyarlari().otomatik) return;
@@ -1222,7 +1237,14 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     if (durum.kosanJoblar.size || durum.girisSurecleri.size || durum.loginContextleri.size) return;
     try {
       const k = await guncellemeVarMi({ zorla: true });
-      if (!k.var) return;
+      if (!k.var) {
+        const diskte = await yerelSurum();
+        if (surecSurumu && diskte && diskte !== surecSurumu) {
+          log.warn('Kod diskte güncel ama panel eski sürümle koşuyor (önceki yeniden başlatma yarım kalmış) — yeniden başlatılıyor…');
+          await yenidenBaslat();
+        }
+        return;
+      }
       log.info(`Yeni sürüm bulundu (${k.adet} değişiklik: ${k.sonMesaj || ''}) — uygulanıyor…`);
       const sonuc = await guncelle();
       sonGuncellemeHatasi = null;
