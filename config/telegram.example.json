@@ -12,7 +12,7 @@
   "_varsayilanVaryant": "mesajda \"demo\" geçmezse bu varyant gönderilir (uretim = damgasız)",
   "varsayilanVaryant": "uretim",
   "demoAnahtari": "demo",
-  "_belgeOlarak": "true → sıkıştırmasız belge olarak gönderir, albüm önizlemesi olmaz",
-  "belgeOlarak": false,
+  "_teslimBicimi": "belge = sıkıştırmasız dosya (orijinal PNG); foto = jpeg'e indirgenmiş fotoğraf albümü",
+  "teslimBicimi": "belge",
   "gonderimUzunKenar": 2000
 }

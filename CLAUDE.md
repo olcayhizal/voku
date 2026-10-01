@@ -228,9 +228,11 @@ uyarı loglanır. Ayar: `varsayilanVaryant` / `demoAnahtari`.
 **Teslim** job olayına bağlıdır, çalıştırana değil: iş panelden başlatılıp
 bitse de kareler sohbete düşer. `kaynakBilgi.teslimAt` damgası aynı işi iki
 kez göndermeyi engeller; bot açılışta biten ama teslim edilmemiş işleri tarar
-(panel kapalıyken biten iş kaybolmaz). Fotoğraflar gönderim öncesi jpeg'e
-indirgenir (Telegram 10MB/foto sınırı); `belgeOlarak: true` sıkıştırmasız
-belge gönderir. Telegram'dan gelen işler **sıra sıra** koşar; iki job'ı aynı
+(panel kapalıyken biten iş kaybolmaz). Varsayılan teslim **belge**
+(`teslimBicimi: "belge"`): kareler sıkıştırmasız orijinal dosya olarak gider.
+`"foto"` seçilirse jpeg'e indirgenip (Telegram 10MB/foto sınırı) fotoğraf
+albümü gider. Eski `belgeOlarak` anahtarı okunmaz — örnekten kopyalanmış
+`false` yeni varsayılanı ezmesin diye. Telegram'dan gelen işler **sıra sıra** koşar; iki job'ı aynı
 anda başlatmak ChatGPT/Gemini kotasını çifter yakardı.
 
 **Dinleme kilidi (`jobs/.telegram.lock`).** Telegram bir token için "kim

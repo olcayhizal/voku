@@ -55,8 +55,12 @@ const VARSAYILAN = {
   varsayilanVaryant: 'uretim',
   /** Mesajda bu kelime geçerse demo (damgalı) hal gönderilir. */
   demoAnahtari: 'demo',
-  /** true → sıkıştırmasız belge olarak gönder (albüm önizlemesi olmaz). */
-  belgeOlarak: false,
+  /**
+   * 'belge' → kareler sıkıştırmasız dosya olarak gider (orijinal PNG, baskıya
+   * hazır); 'foto' → jpeg'e indirgenmiş fotoğraf albümü. Eski `belgeOlarak`
+   * anahtarı okunmaz: örnek dosyadan kopyalanan `false` yeni varsayılanı ezmesin.
+   */
+  teslimBicimi: 'belge',
   /** Fotoğraf gönderiminde uzun kenar sınırı (Telegram 10MB/foto sınırı). */
   gonderimUzunKenar: 2000,
 };
@@ -135,6 +139,7 @@ export function telegramAyarlariniYukle() {
     s.tokenDoldurulmadi = true;
   }
   s.izinliChatler = (s.izinliChatler || []).map(Number).filter(Number.isFinite);
+  s.belgeOlarak = s.teslimBicimi !== 'foto';
   return s;
 }
 
@@ -211,7 +216,7 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
       izinliChatler: tg.izinliChatler,
       toplamaMs: tg.toplamaMs,
       demoGonder: tg.demoGonder,
-      belgeOlarak: tg.belgeOlarak,
+      teslimBicimi: tg.belgeOlarak ? 'belge' : 'foto',
       tokenVar: Boolean(tg.token),
     };
   }
