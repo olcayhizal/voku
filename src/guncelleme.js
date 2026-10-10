@@ -26,7 +26,7 @@ const AYAR_DOSYASI = path.join(ROOT, 'config', 'guncelleme.json');
 const TAZELIK_MS = 6 * 60 * 60 * 1000;
 
 async function git(...argumanlar) {
-  const { stdout } = await calistir('git', argumanlar, { cwd: ROOT, timeout: 60000 });
+  const { stdout } = await calistir('git', argumanlar, { cwd: ROOT, timeout: 60000, windowsHide: true });
   return stdout.trim();
 }
 
@@ -181,6 +181,7 @@ export async function guncelle() {
   if (degisti && kilitOzeti() !== oncekiKilit) {
     const npm = komutCagrisi('npm');
     await calistir(npm.komut, [...npm.onEk, 'install', '--no-audit', '--no-fund'], {
+      windowsHide: true,
       cwd: ROOT,
       timeout: 600000,
     });

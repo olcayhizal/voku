@@ -176,6 +176,7 @@ async function servisiBaslatIc(platform, hesap, port) {
     env: { ...temizProcessEnv, ...cerezEnv, PORT: port },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    windowsHide: true,
   });
   koprular.set(port, surec);
   surec.stdout.on('data', () => {});
@@ -329,6 +330,7 @@ export async function watermarkTemizle(dosyaYolu) {
     const s = spawn('node', [GWR, 'remove', dosyaYolu, '--output', gecici], {
       env: process.env,
       stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
     });
     let hata = '';
     s.stderr.on('data', (d) => (hata += d));

@@ -23,7 +23,7 @@ export function dosyayiGoster(yol) {
 export function tarayicidaAc(adres) {
   if (WINDOWS) {
     // cmd /c start: ilk tırnaklı argüman pencere başlığı sayılır, boş geçilir.
-    return spawn('cmd', ['/c', 'start', '', adres], { stdio: 'ignore', detached: true }).unref();
+    return spawn('cmd', ['/c', 'start', '', adres], { stdio: 'ignore', detached: true, windowsHide: true }).unref();
   }
   if (MAC) return spawn('open', [adres], { stdio: 'ignore', detached: true }).unref();
   return spawn('xdg-open', [adres], { stdio: 'ignore', detached: true }).unref();
@@ -39,7 +39,7 @@ export function pythonKomutu() {
   const adaylar = WINDOWS ? ['python', 'py', 'python3'] : ['python3', 'python'];
   for (const aday of adaylar) {
     try {
-      execFileSync(aday, ['--version'], { stdio: 'ignore' });
+      execFileSync(aday, ['--version'], { stdio: 'ignore', windowsHide: true });
       pythonAdi = aday;
       return aday;
     } catch {
@@ -71,6 +71,7 @@ export function komutYolu(ad) {
   try {
     const cikti = execFileSync(WINDOWS ? 'where' : 'which', [ad], {
       encoding: 'utf8',
+      windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const satirlar = cikti.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -118,6 +119,7 @@ export function portTutaniOldur(port) {
     if (WINDOWS) {
       const out = execFileSync('cmd', ['/c', `netstat -ano | findstr :${port}`], {
         encoding: 'utf8',
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
       const pidler = new Set();
@@ -127,7 +129,7 @@ export function portTutaniOldur(port) {
       }
       for (const pid of pidler) {
         try {
-          execFileSync('taskkill', ['/F', '/PID', pid], { stdio: 'ignore' });
+          execFileSync('taskkill', ['/F', '/PID', pid], { stdio: 'ignore', windowsHide: true });
         } catch {
           /* zaten kapanmış */
         }

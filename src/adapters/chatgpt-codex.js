@@ -212,6 +212,9 @@ function komutCalistir(komut, argumanlar, { timeoutMs, cwd, signal, stdin, codex
       // Her hesap ayrı CODEX_HOME: auth.json ve generated_images orada izole.
       env: codexHome ? { ...process.env, CODEX_HOME: codexHome } : process.env,
       stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      // Windows: panel kendini yeniden başlatınca konsolsuz (detached) koşar;
+      // gizlenmeyen her alt süreç (cmd /c codex.cmd) ayrı cmd penceresi açar.
+      windowsHide: true,
     });
     if (stdin !== undefined) {
       surec.stdin.write(stdin);

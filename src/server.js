@@ -395,6 +395,7 @@ async function surecliGirisBaslat(platformAdi, platform, adaptor, ayarlar, hesap
   const surec = spawn(komut, argumanlar, {
     env: { ...process.env, ...(env || {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   const kayit = { surec, satirlar: [], url: null };
   durum.girisSurecleri.set(anahtar, kayit);
