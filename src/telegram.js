@@ -143,6 +143,45 @@ export function telegramAyarlariniYukle() {
   return s;
 }
 
+const TOKEN_KALIBI = /^\d{6,}:[\w-]{30,}$/;
+
+/**
+ * Panelden girilen bot token'ını Telegram'a sordurup (getMe) doğrular,
+ * geçerliyse `config/telegram.json`'a yazar. Diğer ayarlara dokunmaz.
+ */
+export async function telegramTokenKaydet(token) {
+  const t = String(token || '').trim();
+  if (!TOKEN_KALIBI.test(t)) {
+    throw new Error('Geçersiz token — BotFather\'ın verdiği "123456789:AA…" biçiminde olmalı.');
+  }
+  if (process.env.VOKU_TELEGRAM_TOKEN) {
+    throw new Error('VOKU_TELEGRAM_TOKEN ortam değişkeni tanımlı — dosyadaki token kullanılmaz; önce onu kaldır.');
+  }
+  let ben;
+  try {
+    const yanit = await fetch(`${API}/bot${t}/getMe`, { signal: AbortSignal.timeout(15000) });
+    const veri = await yanit.json().catch(() => ({}));
+    if (!veri.ok) throw new Error(veri.description || `HTTP ${yanit.status}`);
+    ben = veri.result;
+  } catch (e) {
+    throw new Error(`Telegram bu token'ı kabul etmedi: ${e.message}`);
+  }
+  const p = telegramAyarYolu();
+  let ham = {};
+  if (fs.existsSync(p)) {
+    try {
+      ham = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      ham = {}; // bozuk dosya: token'la birlikte temiz yazılır
+    }
+  }
+  ham.token = t;
+  ham.enabled = true;
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(ham, null, 2) + '\n');
+  return { id: ben.id, username: ben.username };
+}
+
 /* ------------------------------------------------------------------ */
 /* metinden künye çıkarma                                              */
 /* ------------------------------------------------------------------ */
@@ -204,8 +243,8 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
   }
   if (!tg.token) {
     durum.hata = tg.tokenDoldurulmadi
-      ? 'Bot token\'ı doldurulmamış: config/telegram.json içindeki "token" alanına BotFather\'dan aldığın anahtarı yaz.'
-      : 'Token yok — config/telegram.json içine token yaz veya VOKU_TELEGRAM_TOKEN ver.';
+      ? 'Bot token\'ı doldurulmamış — BotFather\'dan aldığın token\'ı aşağıdaki alana gir.'
+      : 'Bot token\'ı yok — BotFather\'dan aldığın token\'ı aşağıdaki alana gir.';
     log.warn(`Telegram: ${durum.hata}`);
     return { durum: () => ({ ...durum, ayar: kamuAyar() }), durdur: () => {} };
   }
@@ -483,6 +522,7 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
           yatayEsigi: ayarlar.girdiYatayOrani,
           kaynakBilgi: {
             chatId: taslak.chatId,
+            botId: durum.bot?.id || null,
             mesajId: foto.mesajId,
             kullanici: taslak.kullanici,
             dosyaAdi: foto.ad,
@@ -611,6 +651,10 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
     try {
       const job = jobOku(ozet.id);
       if (job.kaynakBilgi?.teslimAt) return;
+      // Bot değiştiyse (panelden yeni token) eski botun sohbetine yeni bot
+      // yazamaz — "chat not found" döngüsüne girmesin.
+      const isBotu = job.kaynakBilgi?.botId;
+      if (isBotu && durum.bot && isBotu !== durum.bot.id) return;
 
       // Varyant iş açılırken mesajdan belirlendi; eski işlerde alan yok → demo.
       const varyant = job.kaynakBilgi?.teslimVaryanti === 'uretim' ? 'uretim' : 'demo';
@@ -771,7 +815,7 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
       // kişi için bu, token'ın yanlış olduğu anlamına gelir.
       durum.hata =
         e.kod === 401 || e.kod === 404
-          ? 'Bot token\'ı geçersiz — config/telegram.json içindeki "token" alanını kontrol et.'
+          ? 'Bot token\'ı geçersiz — Oturumlar › Telegram kartından yenisini gir.'
           : e.message;
       durumDegisti();
       log.err(`Telegram botu başlatılamadı: ${durum.hata}`);

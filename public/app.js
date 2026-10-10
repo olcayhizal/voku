@@ -1515,6 +1515,67 @@ async function falAnahtarGonder(dugme) {
   }
 }
 
+/**
+ * Bot token'ı girişi / değiştirme. Bot Telegram'da kısıtlanırsa ya da yeni bot
+ * açılırsa token buradan değişir; panel botu yeniden başlatır.
+ */
+function tgTokenBolumu(tg, taslak) {
+  if (tg.ayar?.tokenVar && !tg.hata && !state.tgTokenDuzenle) {
+    return el('div', { class: 'fal-anahtar' },
+      el('span', { class: 'alt-metin', text: 'bot token\'ı kayıtlı' }),
+      el('button', {
+        class: 'btn btn-ikincil btn-kucuk',
+        text: 'Botu değiştir',
+        title: 'BotFather\'dan aldığın yeni bot token\'ını gir',
+        onclick: () => { state.tgTokenDuzenle = true; oturumlariCiz(); document.getElementById('tgTokenGirdi')?.focus(); },
+      })
+    );
+  }
+  return el('div', { class: 'fal-anahtar' },
+    el('input', {
+      class: 'girdi girdi-kucuk',
+      id: 'tgTokenGirdi',
+      type: 'password',
+      placeholder: 'Bot token\'ı (BotFather: 123456789:AA…)',
+      autocomplete: 'off',
+      value: taslak,
+      onkeydown: (e) => { if (e.key === 'Enter') tgTokenGonder(e.target.nextElementSibling); },
+    }),
+    el('button', {
+      class: 'btn btn-birincil btn-kucuk',
+      text: 'Kaydet',
+      onclick: (e) => tgTokenGonder(e.target),
+    }),
+    state.tgTokenDuzenle
+      ? el('button', {
+          class: 'btn btn-ikincil btn-kucuk',
+          text: 'Vazgeç',
+          onclick: () => { state.tgTokenDuzenle = false; oturumlariCiz(); },
+        })
+      : null
+  );
+}
+
+async function tgTokenGonder(dugme) {
+  const girdi = document.getElementById('tgTokenGirdi');
+  const deger = (girdi?.value || '').trim();
+  if (!deger) return alert('Token boş — Telegram\'da @BotFather → /newbot ile alınır.');
+  dugme.disabled = true;
+  dugme.textContent = 'Kontrol ediliyor…';
+  try {
+    const yanit = await api('/api/telegram/token', { method: 'POST', body: { token: deger } });
+    if (girdi) girdi.value = '';
+    state.tgTokenDuzenle = false;
+    state.telegram = yanit.telegram;
+    oturumlariCiz();
+    alert(`Bot bağlandı: @${yanit.bot.username}\nMüşteriler bu botu açıp /start yazmalı.`);
+  } catch (e) {
+    alert(e.message);
+    dugme.disabled = false;
+    dugme.textContent = 'Kaydet';
+  }
+}
+
 async function falModDegistir(ad, mod) {
   try {
     const yanit = await api(`/api/fal/${ad}`, { method: 'PATCH', body: { mod } });
@@ -1553,6 +1614,8 @@ async function falIleDene(jobId, taskId) {
 
 function oturumlariCiz() {
   const kap = $('#oturumKartlari');
+  // Canlı akış kartları yeniden çizer; yarım yazılmış token kaybolmasın.
+  const tgTaslak = document.getElementById('tgTokenGirdi')?.value || '';
   kap.replaceChildren();
 
   for (const p of state.platformlar) {
@@ -1623,6 +1686,7 @@ function oturumlariCiz() {
           text: `${tg.acilanIs || 0} iş açıldı · ${tg.teslimEdilen || 0} teslim · son mesaj ${tarih(tg.sonMesaj)}`,
         }),
         tg.hata ? el('div', { class: 'oturum-satir', text: tg.hata }) : null,
+        tg.panelKapali ? null : tgTokenBolumu(tg, tgTaslak),
         el('p', {
           class: 'alt-metin',
           text: 'Bota gelen her fotoğraf bir iş açar; yanındaki telefon/isim künyeye yazılır. Üretim bitince demo kareler tek albüm halinde sohbete döner.',

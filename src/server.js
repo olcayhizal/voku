@@ -24,7 +24,7 @@ import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import * as falAdaptoru from './adapters/fal.js';
 import * as codexAdaptoru from './adapters/chatgpt-codex.js';
-import { botuBaslat, telegramAyarlariniYukle } from './telegram.js';
+import { botuBaslat, telegramAyarlariniYukle, telegramTokenKaydet } from './telegram.js';
 import { erisimAyarlariniYukle, girebilirMi, cerezKur, KAPI_SAYFASI } from './erisim.js';
 import { disErisimDurumu } from './tunel.js';
 import { guncellemeAyarlari, guncellemeVarMi, guncelle, yerelSurum } from './guncelleme.js';
@@ -54,6 +54,7 @@ const durum = {
   durdurucular: new Map(), // jobId → AbortController
   dogrulama: new Map(), // "plt::hesap" → { hazir, kontrol, mesaj }
   telegram: null, // { durum(), durdur() } — bot açıksa
+  telegramIzinli: true, // panel --no-telegram ile açıldıysa false
 };
 
 /** Oturum haritalarında hesabı ayırt eden anahtar. */
@@ -326,7 +327,7 @@ function durumPaketi(ayarlar, islerLimit = 25) {
     platformlar: Object.values(ayarlar.platforms).map(platformDurumu),
     joblar: sayfa.joblar,
     jobToplam: sayfa.toplam,
-    telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.' },
+    telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.', panelKapali: true },
     fal: falOzeti(),
     abonelik: abonelikDurumu(),
     promptDosyasi: path.relative(ROOT, promptDosyaYolu()),
@@ -825,6 +826,24 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     return json(res, 200, d);
   }
 
+  // --- Telegram bot token'ı (bot kısıtlanınca/değişince panelden) ---
+  if (yol === '/api/telegram/token' && req.method === 'POST') {
+    if (!durum.telegramIzinli) {
+      return json(res, 409, { hata: 'Bu panel Telegram kapalı açıldı (--no-telegram).' });
+    }
+    try {
+      const govde = await govdeOku(req);
+      const bot = await telegramTokenKaydet(govde.token);
+      telegramiBaslat(ayarlar);
+      log.ok(`Telegram token'ı güncellendi — bot artık @${bot.username}`);
+      const d = durum.telegram.durum();
+      yayinla('telegram', d);
+      return json(res, 200, { ok: true, bot, telegram: d });
+    } catch (e) {
+      return json(res, 400, { hata: String(e?.message || e) });
+    }
+  }
+
   // --- fal.ai yedek üretim ---
   if (parcalar[1] === 'fal') {
     try {
@@ -1066,6 +1085,23 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
   return json(res, 404, { hata: `Bilinmeyen uç: ${yol}` });
 }
 
+/**
+ * Botu (yeniden) başlatır: açılışta ve panelden token değişince. Token yoksa
+ * botuBaslat ne yapılacağını söyleyen kapalı bir durum döner — kart token
+ * alanını onunla gösterir.
+ */
+function telegramiBaslat(ayarlar) {
+  if (durum.telegram) durum.telegram.durdur();
+  const tgAyar = telegramAyarlariniYukle();
+  durum.telegram = botuBaslat({
+    ayarlar,
+    telegram: tgAyar,
+    calistir: (job) => jobuArkaPlandaCalistir(job, ayarlar),
+    bildir: (d) => yayinla('telegram', d),
+    izinliMi: () => abonelikAktifMi(),
+  });
+}
+
 export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram = true } = {}) {
   const ayarlar = ayarlariYukle(ayarlarDosyasi);
   sunucuAyarlar = ayarlar;
@@ -1105,18 +1141,8 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
 
   // Telegram botu panelle aynı süreçte koşar: aynı kuyruk, aynı runner, aynı
   // canlı akış. Bottan gelen iş de panelden gelen iş gibi "Durdur" edilebilir.
-  const tgAyar = telegramAyarlariniYukle();
-  if (telegram && tgAyar.enabled && tgAyar.token) {
-    durum.telegram = botuBaslat({
-      ayarlar,
-      telegram: tgAyar,
-      calistir: (job) => jobuArkaPlandaCalistir(job, ayarlar),
-      bildir: (d) => yayinla('telegram', d),
-      izinliMi: () => abonelikAktifMi(),
-    });
-  } else if (telegram && tgAyar.enabled && !tgAyar.token) {
-    log.warn('Telegram botu kapalı: config/telegram.json içinde token yok.');
-  }
+  durum.telegramIzinli = telegram;
+  if (telegram) telegramiBaslat(ayarlar);
 
   const sunucu = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
