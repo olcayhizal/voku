@@ -615,6 +615,13 @@ function jobDetayCiz() {
           ? (() => {
               // Hangi hal gönderilir/gönderildi: mesajda "demo" geçtiyse damgalı.
               const v = job.kaynakBilgi?.teslimVaryanti === 'uretim' ? 'üretim' : 'demo';
+              if (!job.kaynakBilgi?.teslimAt && job.kaynakBilgi?.teslimVazgecildi) {
+                return el('span', {
+                  class: 'kunye-bekler',
+                  title: `Telegram'a ${job.kaynakBilgi.teslimDeneme} kez denendi, gönderilemedi: ${job.kaynakBilgi.teslimSonHata || ''}`,
+                  text: `↩ ${v} gönderilemedi`,
+                });
+              }
               return el('span', {
                 class: job.kaynakBilgi?.teslimAt ? 'kunye-tamam' : 'kunye-bekler',
                 title: job.kaynakBilgi?.teslimAt

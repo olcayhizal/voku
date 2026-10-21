@@ -34,6 +34,13 @@ const DURUM_METNI = {
   pending: 'bekliyor',
 };
 
+/** Teslim yeniden denemeleri arasındaki bekleme (dk); bunlar bitince iş bırakılır. */
+const TESLIM_BEKLEMELER_DK = [2, 10, 30];
+/** Tek istekte gidecek en fazla bayt (belge modunda orijinal PNG'ler büyük). */
+const TESLIM_PARCA_BAYT = 15 * 1024 * 1024;
+/** Açılışta teslim edilmemiş işlerin taranacağı pencere. */
+const ACILIS_TESLIM_PENCERESI_MS = 24 * 60 * 60 * 1000;
+
 const VARSAYILAN = {
   enabled: true,
   token: null,
@@ -594,9 +601,8 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
     return liste;
   }
 
-  /** Telegram foto sınırına sığsın diye jpeg'e indirger (belge modunda dokunmaz). */
+  /** Telegram foto sınırına sığsın diye jpeg'e indirger (yalnız foto gönderiminde). */
   async function gonderimeHazirla(dosya) {
-    if (tg.belgeOlarak) return { ...dosya, gecici: false };
     try {
       const hedef = path.join(os.tmpdir(), `voku-tg-out-${Date.now()}-${dosya.ad.replace(/\.\w+$/, '')}.jpg`);
       await sharp(dosya.yol)
@@ -616,112 +622,179 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
     }
   }
 
-  /** Tek albüm = en fazla 10 öğe; başlık yalnız ilk öğede görünür. */
-  async function albumYolla(chatId, dosyalar, baslik) {
+  /**
+   * Dosyaları istek başına gidecek parçalara böler: en fazla 10 öğe (albüm
+   * sınırı) ve ~15 MB. Belge modunda kareler orijinal PNG; 10'luk tek istek
+   * yavaş hatta 180 sn'yi aşıp iptal oluyordu ("This operation was aborted").
+   */
+  function parcala(dosyalar) {
+    const parcalar = [];
+    let parca = [];
+    let bayt = 0;
+    for (const d of dosyalar) {
+      const b = fs.statSync(d.yol).size;
+      if (parca.length && (parca.length >= 10 || bayt + b > TESLIM_PARCA_BAYT)) {
+        parcalar.push({ dosyalar: parca, bayt });
+        parca = [];
+        bayt = 0;
+      }
+      parca.push(d);
+      bayt += b;
+    }
+    if (parca.length) parcalar.push({ dosyalar: parca, bayt });
+    return parcalar;
+  }
+
+  /** Tek istek: tek dosya sendDocument/sendPhoto, çoklu sendMediaGroup. */
+  async function parcaYolla(chatId, parca, baslik, belge) {
+    // Süre boyuta göre: ~50 KB/sn yavaş yüklemede bile yetişsin.
+    const zamanAsimiMs = Math.max(120000, Math.ceil(parca.bayt / 50));
     const form = new FormData();
-    const media = [];
-    dosyalar.forEach((d, i) => {
+    form.append('chat_id', String(chatId));
+    if (parca.dosyalar.length === 1) {
+      const d = parca.dosyalar[0];
+      form.append(belge ? 'document' : 'photo', new Blob([fs.readFileSync(d.yol)]), d.ad);
+      if (baslik) form.append('caption', baslik);
+      await tgIstek(belge ? 'sendDocument' : 'sendPhoto', null, { form, zamanAsimiMs });
+      return;
+    }
+    const media = parca.dosyalar.map((d, i) => {
       const alan = `f${i}`;
       form.append(alan, new Blob([fs.readFileSync(d.yol)]), d.ad);
-      media.push({
-        type: tg.belgeOlarak ? 'document' : 'photo',
+      return {
+        type: belge ? 'document' : 'photo',
         media: `attach://${alan}`,
         ...(i === 0 && baslik ? { caption: baslik } : {}),
-      });
+      };
     });
-    form.append('chat_id', String(chatId));
     form.append('media', JSON.stringify(media));
-    await tgIstek('sendMediaGroup', null, { form, zamanAsimiMs: 180000 });
+    await tgIstek('sendMediaGroup', null, { form, zamanAsimiMs });
+  }
+
+  /** Teslime hazır mı: Telegram işi, bitmiş, teslim edilmemiş, bekleme süresi dolmuş. */
+  function teslimeHazir(ozet) {
+    const kb = ozet?.kaynakBilgi;
+    if (!kb?.chatId || ozet.kaynak !== 'telegram') return false;
+    if (kb.teslimAt || kb.teslimVazgecildi) return false;
+    if (kb.teslimSonrakiDeneme && Date.parse(kb.teslimSonrakiDeneme) > Date.now()) return false;
+    // Bekleyen/koşan task varsa iş bitmemiştir (durdurulan iş de burada kalır).
+    return !ozet.tasks.some((t) => t.status === 'pending' || t.status === 'running');
+  }
+
+  function kaynakBilgiGuncelle(id, ek) {
+    const guncel = jobOku(id);
+    guncel.kaynakBilgi = { ...(guncel.kaynakBilgi || {}), ...ek };
+    return jobYaz(guncel);
   }
 
   /**
-   * İş bitmişse demo kareleri tek seferde teslim eder.
-   * Job her diske yazıldığında çağrılır; `kaynakBilgi.teslimAt` damgası ve
-   * bellekteki kilit ile bir işi iki kez göndermez.
+   * İş bitmişse kareleri teslim eder. Teslimler tek sırada koşar (açılışta
+   * birikmiş işler aynı anda yüklenip hattı tıkamasın). Gönderilen her parça
+   * `teslimGidenler`e yazılır → yeniden denemede aynı kare iki kez gitmez.
+   * Hata: sohbete yazılmaz, beklemeli yeniden denenir; son denemede de
+   * olmazsa sohbete TEK mesaj gider ve iş bırakılır.
    */
-  async function belkiTeslimEt(ozet) {
-    const chatId = ozet?.kaynakBilgi?.chatId;
-    if (!chatId || ozet.kaynak !== 'telegram') return;
-    if (ozet.kaynakBilgi.teslimAt) return;
-    if (teslimKilidi.has(ozet.id)) return;
-    // Bekleyen/koşan task varsa iş bitmemiştir (durdurulan iş de burada kalır).
-    if (ozet.tasks.some((t) => t.status === 'pending' || t.status === 'running')) return;
+  async function teslimEt(id) {
+    const job = jobOku(id);
+    if (!teslimeHazir(job)) return;
+    const kb = job.kaynakBilgi;
+    const chatId = kb.chatId;
+    // Bot değiştiyse (panelden yeni token) eski botun sohbetine yeni bot
+    // yazamaz — "chat not found" döngüsüne girmesin.
+    if (kb.botId && durum.bot && kb.botId !== durum.bot.id) return;
 
-    teslimKilidi.add(ozet.id);
+    // Varyant iş açılırken mesajdan belirlendi; eski işlerde alan yok → demo.
+    const varyant = kb.teslimVaryanti === 'uretim' ? 'uretim' : 'demo';
+    const dosyalar = tg.demoGonder ? teslimDosyalari(job, varyant) : [];
+    const deneme = kb.teslimDeneme || 0;
+    // Belge iki kez olmadıysa hafif jpeg fotoğrafa düş — hiç gitmemesinden iyi.
+    const belge = tg.belgeOlarak && deneme < 2;
+
     try {
-      const job = jobOku(ozet.id);
-      if (job.kaynakBilgi?.teslimAt) return;
-      // Bot değiştiyse (panelden yeni token) eski botun sohbetine yeni bot
-      // yazamaz — "chat not found" döngüsüne girmesin.
-      const isBotu = job.kaynakBilgi?.botId;
-      if (isBotu && durum.bot && isBotu !== durum.bot.id) return;
-
-      // Varyant iş açılırken mesajdan belirlendi; eski işlerde alan yok → demo.
-      const varyant = job.kaynakBilgi?.teslimVaryanti === 'uretim' ? 'uretim' : 'demo';
-      const dosyalar = tg.demoGonder ? teslimDosyalari(job, varyant) : [];
-      const hatali = job.tasks.filter((t) => t.status === 'failed').length;
-      const kunye = [job.phone ? `tel ${job.phone}` : null, job.note].filter(Boolean).join(' · ');
-
       if (!dosyalar.length) {
-        await mesajYolla(
-          chatId,
-          `${job.id} — kare üretilemedi${hatali ? ` (${hatali} hata)` : ''}. Panelden yeniden denenebilir.`
-        );
+        const hatali = job.tasks.filter((t) => t.status === 'failed').length;
+        await tgIstek('sendMessage', {
+          chat_id: chatId,
+          text: `${job.id} — kare üretilemedi${hatali ? ` (${hatali} hata)` : ''}. Panelden yeniden denenebilir.`,
+        });
       } else {
-        const baslik =
-          `${job.id}${kunye ? ` · ${kunye}` : ''}\n` +
-          `${dosyalar.length} ${varyant === 'demo' ? 'demo (damgalı)' : 'üretim'} kare` +
-          `${hatali ? ` · ${hatali} kare üretilemedi` : ''}`;
-        // Hazırlık toplu yapılır; albümler 10'arlı bölünür ama başlık ilk albümde.
+        const gidenler = new Set(kb.teslimGidenler || []);
+        const kalan = dosyalar.filter((d) => !gidenler.has(d.ad));
+        const hatali = job.tasks.filter((t) => t.status === 'failed').length;
+        const kunye = [job.phone ? `tel ${job.phone}` : null, job.note].filter(Boolean).join(' · ');
+        let baslik = gidenler.size
+          ? null
+          : `${job.id}${kunye ? ` · ${kunye}` : ''}\n` +
+            `${dosyalar.length} ${varyant === 'demo' ? 'demo (damgalı)' : 'üretim'} kare` +
+            `${hatali ? ` · ${hatali} kare üretilemedi` : ''}`;
         const hazir = [];
-        for (const d of dosyalar) hazir.push(await gonderimeHazirla(d));
+        for (const d of kalan) hazir.push(belge ? { ...d, gecici: false } : await gonderimeHazirla(d));
         try {
-          for (let i = 0; i < hazir.length; i += 10) {
-            const parca = hazir.slice(i, i + 10);
-            if (parca.length === 1) {
-              const form = new FormData();
-              form.append('chat_id', String(chatId));
-              form.append(
-                tg.belgeOlarak ? 'document' : 'photo',
-                new Blob([fs.readFileSync(parca[0].yol)]),
-                parca[0].ad
-              );
-              if (i === 0) form.append('caption', baslik);
-              await tgIstek(tg.belgeOlarak ? 'sendDocument' : 'sendPhoto', null, {
-                form,
-                zamanAsimiMs: 180000,
-              });
-            } else {
-              await albumYolla(chatId, parca, i === 0 ? baslik : null);
-            }
+          for (const parca of parcala(hazir)) {
+            await parcaYolla(chatId, parca, baslik, belge);
+            baslik = null;
+            for (const d of parca.dosyalar) gidenler.add(d.ad);
+            kaynakBilgiGuncelle(id, { teslimGidenler: [...gidenler] });
           }
         } finally {
           for (const h of hazir) if (h.gecici) fs.rmSync(h.yol, { force: true });
         }
       }
 
-      const guncel = jobOku(ozet.id);
-      guncel.kaynakBilgi = {
-        ...(guncel.kaynakBilgi || {}),
+      kaynakBilgiGuncelle(id, {
         teslimAt: new Date().toISOString(),
         teslimAdet: dosyalar.length,
         teslimVaryanti: varyant,
-      };
-      jobYaz(guncel);
+        teslimBicimi: belge ? 'belge' : 'foto',
+        teslimSonHata: null,
+        teslimSonrakiDeneme: null,
+      });
       durum.teslimEdilen++;
       durumDegisti();
-      log.ok(`Telegram teslim: ${job.id} → ${dosyalar.length} ${varyant} karesi`);
+      log.ok(`Telegram teslim: ${job.id} → ${dosyalar.length} ${varyant} karesi (${belge ? 'belge' : 'foto'})`);
     } catch (e) {
-      log.err(`Telegram teslim başarısız (${ozet.id}): ${e.message}`);
-      await mesajYolla(chatId, `${ozet.id} teslim edilemedi: ${e.message}`);
-    } finally {
-      teslimKilidi.delete(ozet.id);
+      const yeniDeneme = deneme + 1;
+      if (yeniDeneme >= TESLIM_BEKLEMELER_DK.length + 1) {
+        kaynakBilgiGuncelle(id, {
+          teslimDeneme: yeniDeneme,
+          teslimSonHata: e.message,
+          teslimVazgecildi: new Date().toISOString(),
+        });
+        log.err(`Telegram teslim bırakıldı (${id}, ${yeniDeneme} deneme): ${e.message}`);
+        await mesajYolla(
+          chatId,
+          `${id} gönderilemedi (${yeniDeneme} deneme). Kareler panelde duruyor.`
+        );
+      } else {
+        const beklemeMs = TESLIM_BEKLEMELER_DK[deneme] * 60000;
+        kaynakBilgiGuncelle(id, {
+          teslimDeneme: yeniDeneme,
+          teslimSonHata: e.message,
+          teslimSonrakiDeneme: new Date(Date.now() + beklemeMs).toISOString(),
+        });
+        log.warn(`Telegram teslim başarısız (${id}, deneme ${yeniDeneme}): ${e.message} — ${beklemeMs / 60000} dk sonra yeniden`);
+        const z = setTimeout(() => {
+          try {
+            jobDinleyici(jobOku(id));
+          } catch {
+            /* iş silinmiş olabilir */
+          }
+        }, beklemeMs + 1000);
+        z.unref?.();
+      }
     }
   }
 
   // Teslim job olayına bağlı — işi panelden başlatsan da sonuç sohbete düşer.
+  let teslimSirasi = Promise.resolve();
   const jobDinleyici = (job) => {
-    belkiTeslimEt(job).catch((e) => log.err(`Teslim hatası: ${e.message}`));
+    if (durduruldu || !teslimeHazir(job) || teslimKilidi.has(job.id)) return;
+    teslimKilidi.add(job.id);
+    teslimSirasi = teslimSirasi.then(() =>
+      teslimEt(job.id)
+        .catch((e) => log.err(`Teslim hatası: ${e.message}`))
+        .finally(() => teslimKilidi.delete(job.id))
+    );
   };
   olaylar.on('job', jobDinleyici);
 
@@ -807,7 +880,13 @@ export function botuBaslat({ ayarlar, telegram, calistir, bildir, izinliMi } = {
           (tg.izinliChatler.length ? ` (izinli: ${tg.izinliChatler.join(', ')})` : ' (herkese açık)')
       );
       // Panel kapalıyken biten işler varsa açılışta teslim edilir.
-      for (const j of jobListele()) jobDinleyici(j);
+      // Son 24 saatte bitenlerle sınırlı: eski, teslim edilmemiş işler her
+      // açılışta sohbete yığılmasın (kareleri panelde duruyor).
+      const sinir = Date.now() - ACILIS_TESLIM_PENCERESI_MS;
+      for (const j of jobListele()) {
+        const bitis = Math.max(0, ...j.tasks.map((t) => Date.parse(t.finishedAt || '') || 0));
+        if (bitis >= sinir) jobDinleyici(j);
+      }
       await dongu();
     } catch (e) {
       durum.acik = false;

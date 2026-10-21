@@ -232,7 +232,17 @@ kez göndermeyi engeller; bot açılışta biten ama teslim edilmemiş işleri t
 (`teslimBicimi: "belge"`): kareler sıkıştırmasız orijinal dosya olarak gider.
 `"foto"` seçilirse jpeg'e indirgenip (Telegram 10MB/foto sınırı) fotoğraf
 albümü gider. Eski `belgeOlarak` anahtarı okunmaz — örnekten kopyalanmış
-`false` yeni varsayılanı ezmesin diye. Telegram'dan gelen işler **sıra sıra** koşar; iki job'ı aynı
+`false` yeni varsayılanı ezmesin diye.
+
+**Teslim sırası ve hata (2026-10-21).** Teslimler tek sırada koşar; açılışta
+yalnız son 24 saatte biten işler taranır. Dosyalar istek başına ≤10 öğe ve
+~15 MB'lık parçalara bölünür, zaman aşımı boyuta göre (~50 KB/sn). Giden
+parçalar `kaynakBilgi.teslimGidenler`e yazılır → yeniden denemede mükerrer
+yok. Hata sohbete yazılmaz: 2/10/30 dk beklemeyle yeniden denenir, ikinci
+belge hatasından sonra jpeg fotoğrafa düşülür; dördüncü hatada sohbete TEK
+mesaj gider, `teslimVazgecildi` yazılır. (Eskiden her açılışta biriken
+bütün işler aynı anda yükleniyor, hattı tıkayıp her biri "teslim
+edilemedi: This operation was aborted" spamı atıyordu.) Telegram'dan gelen işler **sıra sıra** koşar; iki job'ı aynı
 anda başlatmak ChatGPT/Gemini kotasını çifter yakardı.
 
 **Dinleme kilidi (`jobs/.telegram.lock`).** Telegram bir token için "kim
