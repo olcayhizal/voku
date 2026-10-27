@@ -1,0 +1,12 @@
+diff --git a/internal/modules/providers/gemini_service.go b/internal/modules/providers/gemini_service.go
+index c1a1d96..b883d0f 100644
+--- a/internal/modules/providers/gemini_service.go
++++ b/internal/modules/providers/gemini_service.go
+@@ -259,7 +259,6 @@ func (c *Client) refreshSessionToken() error {
+ 	req2.Header.Set("Sec-Fetch-Site", "same-origin")
+ 	req2.Header.Set("Cookie", cookieStr)
+ 	req2.Header.Set("Referer", "https://gemini.google.com/")
+-	req2.Header.Set("Accept-Encoding", "gzip, deflate, br")
+ 
+ 	resp, err := hClient.Do(req2)
+ 	if err != nil {

@@ -1333,6 +1333,12 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     log.info(`Paylaşım bağlantısı: <dış-adres>/?anahtar=${erisim.erisimToken}`);
     log.info('Kapatmak için Ctrl+C.');
     if (ac) tarayicidaAc(adres);
+    // Güncellemeyle yeni köprü yaması geldiyse ilk işten önce derlensin.
+    try {
+      adaptorAl('gemini-http').kopruyuGuncelTut?.();
+    } catch {
+      /* gemini-http sürücüsü yok */
+    }
   });
 
   const kapat = async () => {

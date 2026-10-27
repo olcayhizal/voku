@@ -16,10 +16,14 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ROOT } from '../paths.js';
-import { calistirilabilir, portTutaniOldur } from '../platform.js';
+import { calistirilabilir, komutYolu, portTutaniOldur } from '../platform.js';
 import { log } from '../logger.js';
+
+const calistir = promisify(execFile);
 
 export const ad = 'gemini-http';
 export const tarayiciGerekli = false;
@@ -30,9 +34,13 @@ const SERVIS_DIZINI = path.join(ROOT, 'tools', 'gemini-web-to-api');
 const SERVIS_BINARY = path.join(ROOT, 'tools', calistirilabilir('gemini-api-server'));
 const ENV_DOSYASI = path.join(SERVIS_DIZINI, '.env');
 const GWR = path.join(ROOT, 'tools', 'gwr', 'bin', 'gwr.mjs');
+const YAMA_DIZINI = path.join(ROOT, 'patches');
+const YAMA_DAMGASI = path.join(SERVIS_DIZINI, '.voku-yama');
 
 // Çoklu hesap: her hesap ayrı portta ayrı köprü sürecidir. port → süreç.
 const koprular = new Map();
+// port → köprünün stderr'e yazdığı son "authentication failed: ..." sebebi.
+const sonAuthHatasi = new Map();
 
 /** Bir hesabın portu (tek hesapta baseUrl'den, çokluda hesap.port). */
 function portu(platform, hesap) {
@@ -122,6 +130,111 @@ async function portuBosalt(port) {
   }
 }
 
+function goYolu() {
+  const adaylar = [
+    komutYolu('go'),
+    'C:\\Program Files\\Go\\bin\\go.exe',
+    '/opt/homebrew/bin/go',
+    '/usr/local/go/bin/go',
+    '/usr/local/bin/go',
+  ];
+  return adaylar.find((a) => a && fs.existsSync(a)) || null;
+}
+
+async function gitDene(...argumanlar) {
+  try {
+    await calistir('git', argumanlar, { cwd: SERVIS_DIZINI, timeout: 60000, windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Bir yamayı köprü kaynağına uygular. Windows'ta autocrlf yama ile kaynağın
+ * satır sonlarını farklılaştırabilir → önce düz, olmazsa boşluk-duyarsız.
+ * Dönüş: 'uygulandi' | 'zaten' | 'uymadi'.
+ */
+async function yamaUygula(yol) {
+  for (const ek of [[], ['--ignore-whitespace']]) {
+    if (await gitDene('apply', ...ek, '--check', yol)) {
+      if (await gitDene('apply', ...ek, yol)) return 'uygulandi';
+    }
+    if (await gitDene('apply', ...ek, '--reverse', '--check', yol)) return 'zaten';
+  }
+  return 'uymadi';
+}
+
+async function kopruyuDerle() {
+  const go = goYolu();
+  if (!go) throw new Error('Go bulunamadı — scripts/motorlari-kur ile kur.');
+  const yeni = `${SERVIS_BINARY}.yeni`;
+  await calistir(go, ['build', '-o', yeni, './cmd/server'], {
+    cwd: SERVIS_DIZINI,
+    timeout: 10 * 60 * 1000,
+    windowsHide: true,
+  });
+  // Windows'ta çalışan .exe'nin üzerine yazılamaz ama adı değiştirilebilir:
+  // eskiyi kenara al, yeniyi yerine koy. Hâlâ koşan eski köprü kendi imajıyla
+  // biter; portuBosalt onu kapatır, sonraki başlatma yeni binary'yi kullanır.
+  if (fs.existsSync(SERVIS_BINARY)) fs.renameSync(SERVIS_BINARY, `${SERVIS_BINARY}.eski-${Date.now()}`);
+  fs.renameSync(yeni, SERVIS_BINARY);
+  const tools = path.dirname(SERVIS_BINARY);
+  for (const f of fs.readdirSync(tools)) {
+    if (!f.startsWith(`${path.basename(SERVIS_BINARY)}.eski-`)) continue;
+    try {
+      fs.rmSync(path.join(tools, f), { force: true });
+    } catch {
+      /* hâlâ koşuyor — bir sonraki derlemede silinir */
+    }
+  }
+}
+
+/**
+ * Köprü kaynağı git dışında (tools/) ve kurulumda bir kez derleniyor;
+ * otomatik güncelleme yalnız voku deposunu çeker. `patches/gemini-web-to-api*.patch`
+ * kümesi değişince (imza damgadan farklı) yamalar uygulanır ve köprü yeniden
+ * derlenir — kurulumda kimsenin betik çalıştırması gerekmez.
+ * Örnek: Google Ekim 2026'da gemini.google.com yanıtını brotli'ye çevirdi;
+ * `br` isteyip yalnız gzip açan köprü sayfayı okuyamadı ("SNlM0e not found"),
+ * yeniden giriş çözmedi (sikistirma yaması).
+ * Başarısızlık köprüyü durdurmaz: eldeki binary ile devam edilir, damga
+ * yazılmaz, sonraki açılışta yeniden denenir.
+ */
+let guncelTutSozu = null;
+export function kopruyuGuncelTut() {
+  if (!guncelTutSozu) {
+    guncelTutSozu = kopruyuGuncelTutIc().catch((e) =>
+      log.err(`[gemini-http] köprü yaması/derlemesi başarısız: ${String(e.message).slice(0, 300)}`)
+    );
+  }
+  return guncelTutSozu;
+}
+
+async function kopruyuGuncelTutIc() {
+  if (!fs.existsSync(path.join(SERVIS_DIZINI, '.git')) || !fs.existsSync(YAMA_DIZINI)) return;
+  const yamalar = fs
+    .readdirSync(YAMA_DIZINI)
+    .filter((f) => /^gemini-web-to-api.*\.patch$/.test(f))
+    .sort();
+  const ozet = crypto.createHash('sha256');
+  // CR'ler atılır: Windows checkout'u (autocrlf) imzayı değiştirmesin.
+  for (const f of yamalar) ozet.update(f).update(fs.readFileSync(path.join(YAMA_DIZINI, f), 'utf8').replace(/\r/g, ''));
+  const imza = ozet.digest('hex').slice(0, 16);
+  const damga = fs.existsSync(YAMA_DAMGASI) ? fs.readFileSync(YAMA_DAMGASI, 'utf8').trim() : '';
+  if (imza === damga && fs.existsSync(SERVIS_BINARY)) return;
+
+  for (const f of yamalar) {
+    const sonuc = await yamaUygula(path.join(YAMA_DIZINI, f));
+    if (sonuc === 'uygulandi') log.ok(`[gemini-http] köprüye yama uygulandı: ${f}`);
+    else if (sonuc === 'uymadi') log.warn(`[gemini-http] ${f} köprü kaynağına uymadı (farklı sürüm) — atlandı`);
+  }
+  log.info('[gemini-http] köprü yeniden derleniyor (yama kümesi değişti)…');
+  await kopruyuDerle();
+  fs.writeFileSync(YAMA_DAMGASI, `${imza}\n`);
+  log.ok(`[gemini-http] köprü derlendi (yama imzası ${imza})`);
+}
+
 // port → süren başlatma sözü. Bekçi düzinelerce işi aynı anda saldığında her
 // worker aynı hesabın köprüsünü ayrı ayrı spawn edip portu kapışıyordu
 // ("failed to listen" + 4x "köprü başlatılıyor"). Eşzamanlı çağrılar tek
@@ -138,6 +251,7 @@ function servisiBaslat(platform, hesap) {
 }
 
 async function servisiBaslatIc(platform, hesap, port) {
+  await kopruyuGuncelTut();
   // Zaten çalışan köprü: yalnız ayakta değil, Gemini'ye bağlı da olmalı.
   if (koprular.has(port) && (await saglikli(port)) && (await modelListesi(port)).length) return;
 
@@ -179,8 +293,14 @@ async function servisiBaslatIc(platform, hesap, port) {
     windowsHide: true,
   });
   koprular.set(port, surec);
+  sonAuthHatasi.delete(port);
   surec.stdout.on('data', () => {});
-  surec.stderr.on('data', (d) => log.warn(`[gemini-http:${port}] ${String(d).trim().slice(0, 200)}`));
+  surec.stderr.on('data', (d) => {
+    const metin = String(d);
+    const m = metin.match(/authentication failed: ([^"|\r\n]+)/);
+    if (m) sonAuthHatasi.set(port, m[1].trim());
+    log.warn(`[gemini-http:${port}] ${metin.trim().slice(0, 200)}`);
+  });
   surec.on('close', () => {
     if (koprular.get(port) === surec) koprular.delete(port);
   });
@@ -206,8 +326,14 @@ async function servisiBaslatIc(platform, hesap, port) {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
+  // "SNlM0e not found" çerez değil SAYFA sorunu: köprü Gemini sayfasını
+  // çözemiyor (Google yapı/sıkıştırma değiştirdi). Yeniden giriş çözmez —
+  // kullanıcıyı giriş döngüsüne sokmamak için ayrı söylenir.
+  const sebep = sonAuthHatasi.get(port) || '';
   const e = new Error(
-    `Gemini "${hesap?.ad || 'varsayılan'}" oturumu geçersiz: köprü ayakta ama model listesi boş (çerezler ölmüş). Panelden bu hesaba yeniden giriş yap.`
+    /SNlM0e not found/i.test(sebep)
+      ? `Gemini "${hesap?.ad || 'varsayılan'}": köprü Gemini sayfasını okuyamıyor (SNlM0e bulunamadı). Bu bir köprü uyumsuzluğu, yeniden giriş çözmez — köprü güncellemesi gerek.`
+      : `Gemini "${hesap?.ad || 'varsayılan'}" oturumu geçersiz: köprü ayakta ama model listesi boş (çerezler ölmüş). Panelden bu hesaba yeniden giriş yap.`
   );
   e.limitDolu = true; // runner failover'a soksun (başka hesaba geç)
   e.sebep = 'oturum';
