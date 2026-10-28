@@ -502,6 +502,34 @@ function uretimSayaci(home, fark) {
   aktifUretimler.set(home, Math.max(0, (aktifUretimler.get(home) || 0) + fark));
 }
 
+/* ---------------- disk temizliği ile eşgüdüm ----------------
+ * codex-temizlik.js hesabın sqlite'ını sıkıştırırken o hesapta Codex
+ * koşmamalı: temizlik yalnız boştaki hesaba kilit alır, kilit sürerken
+ * gelen üretim bitmesini bekler (uret).
+ */
+const temizlikKilitleri = new Map(); // codexHome → Promise
+
+/** Bellekteki sohbet havuzunun devam ettirilecek oturumları — silinmez. */
+export function yasayanSohbetler() {
+  const kimlikler = new Set();
+  for (const liste of sohbetler.values()) {
+    for (const k of liste) if (k.id) kimlikler.add(k.id);
+  }
+  return kimlikler;
+}
+
+/** Hesapta üretim yoksa kilidi alıp işi koşar; üretim sürüyorsa null döner. */
+export async function bostaykenKilitle(home, is) {
+  if ((aktifUretimler.get(home) || 0) > 0 || temizlikKilitleri.has(home)) return null;
+  const sonuc = is();
+  temizlikKilitleri.set(home, sonuc.catch(() => {}));
+  try {
+    return await sonuc;
+  } finally {
+    temizlikKilitleri.delete(home);
+  }
+}
+
 /**
  * Aynı prompt'un işleri paralel gelebilsin diye prompt başına birden çok
  * sohbet tutulur (`sohbetParalel`, varsayılan 2): boşta sohbet varsa o,
@@ -601,6 +629,8 @@ export function oturumKimligiCoz(ham) {
 export async function uret(_page, girdi) {
   const { platform, hesap, promptId, prompt } = girdi;
   const home = codexKoku(hesap);
+  // Disk temizliği bu hesabın sqlite'ını sıkıştırıyorsa önce o biter.
+  while (temizlikKilitleri.has(home)) await temizlikKilitleri.get(home);
   uretimSayaci(home, +1);
   try {
     return await uretIc(girdi);

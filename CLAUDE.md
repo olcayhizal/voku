@@ -432,6 +432,28 @@ Kontak baskısı ve film şeridi ham PNG yüklemez: `?b=k` (480 px) / `?b=o`
 - Yeni platform panele kendiliğinden gelir (`config/settings.json > platforms`).
   Ekranda güzel adı için `PLATFORM_ETIKET` (public/app.js) haritasına bir satır.
 
+## Codex disk temizliği
+Codex ürettiği her görseli profilinde üç kez saklar ve hiç silmez:
+`generated_images/<thread>/*.png`, `sessions/**/rollout-*.jsonl` (giriş
+fotoğrafı + çıktı base64) ve `thread_history_N.sqlite` (aynı görsel yine
+base64). Canlı kurulumda `.profiles` 121 GB olmuştu (2026-10-28); tek hesap 36 GB.
+Çıktı iş klasörüne zaten kopyalandığı için bunlar fazlalık.
+
+`src/codex-temizlik.js` panel açılışından 2 dk sonra ve 3 saatte bir
+(`VOKU_TEMIZLIK_ARALIK_MS`) yalnız `.profiles/*/.codex` altında:
+- 2 saatten eski görselleri siler,
+- sohbet havuzunda yaşamayan ve 2 saatten eski oturum dosyalarını siler,
+- `thread_history_*` / `logs_*` sqlite'larından oturum dosyası kalmamış
+  sohbetlerin satırlarını silip VACUUM eder. Bu adım worker'da koşar
+  (`codex-temizlik-isci.js`, `node:sqlite`, Node 22.13+) ve yalnız boştaki
+  hesaba kilit alır; kilit sürerken gelen üretim bekler. Üretim sürüyorsa
+  10 dk sonra yeniden denenir.
+
+Yanlış silinen oturum üretimi bozmaz: silinmiş sohbete `resume` Codex'te
+boş bağlamla sürer (sınandı), adapter da devam edemediği sohbette yenisini
+açar. `VOKU_CODEX_TEMIZLIK=0` kapatır. Durum: `GET /api/debug/disk`
+(profil/klasör boyutları + son temizlik karnesi), `POST` elle tur başlatır.
+
 ## Dosya haritası
 ```
 config/settings.json   çalışma ayarları (timeout, retry, headless, selector override)
@@ -447,6 +469,7 @@ src/store.js           jobs/*.json atomic okuma-yazma
 src/runner.js          kuyruk, retry, platform paralelliği
 src/browser.js         playwright persistent context yönetimi
 src/adapters/*.js      chatgpt / gemini sürücüleri
+src/codex-temizlik.js  Codex profillerinde biriken görsel/oturum/sqlite temizliği
 src/varyant.js         uretim/demo/baski klasörleri, DEMO damgası
 src/logger.js          konsol + logs/voku.log
 jobs/<id>.json         job state (tek kaynak)

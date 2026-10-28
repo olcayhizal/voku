@@ -30,6 +30,7 @@ import { disErisimDurumu } from './tunel.js';
 import { guncellemeAyarlari, guncellemeVarMi, guncelle, yerelSurum } from './guncelleme.js';
 import { lisansTazele, durum as abonelikDurumu, aktifMi as abonelikAktifMi } from './abonelik.js';
 import { havuzOzeti, uygunHesapVar, dinlenmeyiKaldir } from './havuz.js';
+import { codexTemizle, sonTemizlik, dizinBoyutu } from './codex-temizlik.js';
 import { dosyayiGoster, tarayicidaAc } from './platform.js';
 import { log, logAbone } from './logger.js';
 
@@ -685,6 +686,21 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     return res.end(metin);
   }
 
+  // Disk: profil boyutları + son Codex temizliğinin karnesi. POST elle
+  // temizlik turu başlatır (otomatik tur zaten 3 saatte bir koşar).
+  if (yol === '/api/debug/disk' && (req.method === 'GET' || req.method === 'POST')) {
+    const son = req.method === 'POST' ? await codexTemizle() : sonTemizlik();
+    const profiller = {};
+    for (const ad of fs.existsSync(path.join(ROOT, '.profiles')) ? fs.readdirSync(path.join(ROOT, '.profiles')) : []) {
+      profiller[ad] = (await dizinBoyutu(path.join(ROOT, '.profiles', ad))).bayt;
+    }
+    const klasorler = {};
+    for (const ad of ['output', 'jobs', 'logs', 'tools', 'node_modules']) {
+      klasorler[ad] = (await dizinBoyutu(path.join(ROOT, ad))).bayt;
+    }
+    return json(res, 200, { profiller, klasorler, sonTemizlik: son });
+  }
+
   // --- baskı odası ---
   if (yol === '/api/baski-odasi' && req.method === 'GET') {
     return json(res, 200, odaOzeti());
@@ -1313,6 +1329,17 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     }
   }, 60000);
   bekci.unref?.();
+
+  // --- Codex disk temizliği ---
+  // Codex her görseli üç kopya halinde profilinde biriktiriyor (bkz.
+  // codex-temizlik.js). Açılıştan 2 dk sonra, sonra 3 saatte bir.
+  // VOKU_CODEX_TEMIZLIK=0 kapatır.
+  if (process.env.VOKU_CODEX_TEMIZLIK !== '0') {
+    const temizlikTuru = () => codexTemizle().catch((e) => log.warn(`Codex disk temizliği yarım kaldı: ${e.message}`));
+    setTimeout(temizlikTuru, 2 * 60 * 1000).unref?.();
+    const temizlikAralik = Number(process.env.VOKU_TEMIZLIK_ARALIK_MS) || 3 * 60 * 60 * 1000;
+    setInterval(temizlikTuru, temizlikAralik).unref?.();
+  }
 
   // Restart devri: eski süreç portu bırakmadan yeni süreç doğabilir —
   // EADDRINUSE'da ölmek paneli tamamen düşürür (dışarıdan 502). Bekle-dene.
