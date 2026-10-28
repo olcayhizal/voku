@@ -638,7 +638,7 @@ function jobDetayCiz() {
         el('span', { text: DURUM_ETIKET[durum] }),
         job.inputBoyut
           ? el('span', {
-              text: `${job.inputBoyut.genislik}×${job.inputBoyut.yukseklik}${job.inputDonduruldu ? ' ↻ döndürüldü' : ''}`,
+              text: `${job.inputBoyut.genislik}×${job.inputBoyut.yukseklik}${job.inputDonduruldu ? ' ↻ döndürüldü' : job.inputYatay ? ' · yatay' : ''}`,
             })
           : null,
         job.note ? el('span', { text: job.note }) : null

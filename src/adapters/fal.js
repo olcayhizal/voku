@@ -161,22 +161,23 @@ function hataCevir(e) {
   return e;
 }
 
-export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal }) {
+export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar, platform, signal, yatay }) {
   const apiKey = anahtar(ayarlar);
   const model = platform.falModel;
   if (!model) throw new Error(`${platform.ad} için fal modeli tanımlı değil.`);
 
   try {
     const girdiUrl = await gorseliYukle(imagePath, apiKey);
-    // Çıktı standardı: 3:4 dikey, orta kalite. Parametre adları model
-    // ailesine göre değişiyor (gpt-image: image_size+quality, nano-banana:
-    // aspect_ratio+resolution) — model değişirse dal otomatik uyar.
+    // Çıktı standardı: 3:4 dikey (yatay işte 4:3 yatay), orta kalite.
+    // Parametre adları model ailesine göre değişiyor (gpt-image:
+    // image_size+quality, nano-banana: aspect_ratio+resolution) — model
+    // değişirse dal otomatik uyar.
     const govde = { prompt, image_urls: [girdiUrl] };
     if (/gpt-image/i.test(model)) {
-      govde.image_size = 'portrait_4_3'; // 3:4 dikey
+      govde.image_size = yatay ? 'landscape_4_3' : 'portrait_4_3';
       govde.quality = 'medium';
     } else if (/nano-banana|gemini/i.test(model)) {
-      govde.aspect_ratio = '3:4';
+      govde.aspect_ratio = yatay ? '4:3' : '3:4';
       govde.resolution = '1K'; // 0.5K/1K/2K/4K içinde orta seviye
     }
     const istek = await falIstek(`${KUYRUK_KOKU}/${model}`, apiKey, {

@@ -20,7 +20,7 @@ export const VARYANTLAR = ['uretim', 'demo', 'baski'];
  * Baskı şablonları: her ikisi de dikey tuval (898×1181); fark logo yönünde.
  * - dikey.png  → "VOKU" altta yatay okunur (girdi zaten dikeydi)
  * - yatay.png  → "VOKU" sol kenarda dik; ürün çevrilince okunur
- *                (girdi yataydı, job açılırken döndürülmüştü)
+ *                (yatay iş: çıktı baskıda 90° çevrilip tuvale oturur)
  */
 /**
  * Baskı tuvali (piksel). Epson en-boy oranını koruduğu için baskı genişliği
@@ -121,12 +121,21 @@ export async function demoUret(kaynakYol, hedefYol) {
  * 2. Şablon (VOKU logosu) üstüne bindirilir.
  * 3. Transfer baskı için ayna alınır; eksen ürünün yönüne göre değişir:
  *    - dikey iş  → dikey eksende yansıma (sol ↔ sağ)
- *    - döndürülmüş (yatay) iş → yatay eksende yansıma (üst ↔ alt)
+ *    - yatay iş → yatay eksende yansıma (üst ↔ alt)
+ *
+ * Yatay iş (`yatayIs`, girdi döndürülmeden yatay üretilir): yatay çıktı
+ * dikey tuvale saat yönünde 90° çevrilip oturur — eski akışta girdinin
+ * çevrildiği yönün aynısı, ürün değişmez. Model yine de dikey verdiyse
+ * görsel düz durur, dikey şablon kullanılır. `dondurulmus`: girdisi
+ * çevrilerek üretilmiş eski işler (çıktı zaten dikey, şablon yatay).
  *
  * Kaynak **üretim** klasörüdür; demo damgası baskıya karışmaz.
  */
-export async function baskiUret(kaynakYol, hedefYol, { dondurulmus = false, kirpma = 'centre' } = {}) {
-  const sablonYolu = BASKI_SABLONLARI[dondurulmus ? 'yatay' : 'dikey'];
+export async function baskiUret(kaynakYol, hedefYol, { dondurulmus = false, yatayIs = false, kirpma = 'centre' } = {}) {
+  const kaynakBilgi = await sharp(kaynakYol).metadata();
+  const cevir = yatayIs && kaynakBilgi.width > kaynakBilgi.height;
+  const yatayUrun = dondurulmus || cevir;
+  const sablonYolu = BASKI_SABLONLARI[yatayUrun ? 'yatay' : 'dikey'];
   if (!fs.existsSync(sablonYolu)) {
     throw new Error(`Baskı şablonu yok: ${path.relative(ROOT, sablonYolu)}`);
   }
@@ -139,7 +148,9 @@ export async function baskiUret(kaynakYol, hedefYol, { dondurulmus = false, kirp
   // Şablon 898 px; 1 px fark logoyu görünür biçimde kaydırmaz.
   const [width, height] = BASKI_TUVALI;
 
-  const zemin = await sharp(kaynakYol)
+  // Çevirme ayrı aşamada: rotate ile resize aynı zincirde sıraya duyarlı.
+  const kaynak = cevir ? await sharp(kaynakYol).rotate(90).toBuffer() : kaynakYol;
+  const zemin = await sharp(kaynak)
     .resize(width, height, { fit: 'cover', position: kirpma })
     .toBuffer();
 
@@ -161,7 +172,7 @@ export async function baskiUret(kaynakYol, hedefYol, { dondurulmus = false, kirp
 
   const son = sharp(birlesikBuf);
   fs.mkdirSync(path.dirname(hedefYol), { recursive: true });
-  await (dondurulmus ? son.flip() : son.flop()).png().toFile(hedefYol);
+  await (yatayUrun ? son.flip() : son.flop()).png().toFile(hedefYol);
   return hedefYol;
 }
 
@@ -183,7 +194,10 @@ export async function taskVaryantlariniUret(job, task, { yenidenUret = false } =
 
     const baskiHedef = path.join(varyantDizini(job, 'baski'), dosya);
     if (yenidenUret || !fs.existsSync(baskiHedef)) {
-      await baskiUret(kaynak, baskiHedef, { dondurulmus: Boolean(job.inputDonduruldu) });
+      await baskiUret(kaynak, baskiHedef, {
+        dondurulmus: Boolean(job.inputDonduruldu),
+        yatayIs: Boolean(job.inputYatay),
+      });
       uretilen.push(`baski/${dosya}`);
     }
   }
@@ -211,34 +225,53 @@ export function uretimeTasi(job) {
 
 /**
  * Girdi fotoğrafını job klasörüne hazırlar.
- * Önce EXIF yönü uygulanır (telefon fotoğrafları çoğu zaman dönük saklanır),
- * sonra kare/dikey hale getirilir: fotoğraf **belirgin biçimde yatay** ise
- * (genişlik/yükseklik ≥ `yatayEsigi`) saat yönünde 90° döndürülür. Üretim
- * böylece hep dikey çerçeveden başlar.
+ * EXIF yönü uygulanır (telefon fotoğrafları çoğu zaman dönük saklanır) ve
+ * fotoğraf **belirgin biçimde yatay** ise (genişlik/yükseklik ≥ `yatayEsigi`)
+ * iş yatay işaretlenir. Yatay fotoğraf DÖNDÜRÜLMEZ (2026-10-28): eskiden
+ * saat yönünde 90° çevrilip dikey üretiliyordu, model yan yatmış sahneyi
+ * düzeltmeye çalışınca kafa ve duruşlar yamuluyordu. Artık yatay üretilir
+ * (promptuYonlendir), baskıda çevrilir (baskiUret).
  *
  * Eşik neden var: 1 piksel bile geniş olan (kareye çok yakın) fotoğraflar
- * yatay sayılıp gereksiz döndürülüyordu. Varsayılan 1.2 = genişlik en az %20
- * fazla olmalı; `settings.json > girdiYatayOrani` ile değiştirilebilir.
+ * yatay sayılıyordu. Varsayılan 1.2 = genişlik en az %20 fazla olmalı;
+ * `settings.json > girdiYatayOrani` ile değiştirilebilir.
  *
- * @returns {Promise<{dondu: boolean, genislik: number, yukseklik: number}>}
+ * @returns {Promise<{dondu: boolean, yatay: boolean, genislik: number, yukseklik: number}>}
  */
 export async function girdiyiHazirla(kaynakYol, hedefYol, { yatayEsigi = 1.2 } = {}) {
   const { data, info } = await sharp(kaynakYol)
     .rotate() // EXIF orientation
     .toBuffer({ resolveWithObject: true });
 
-  const oran = info.width / info.height;
   const esik = Number(yatayEsigi) > 1 ? Number(yatayEsigi) : 1.2;
+  fs.writeFileSync(hedefYol, data);
+  return {
+    dondu: false,
+    yatay: info.width / info.height >= esik,
+    genislik: info.width,
+    yukseklik: info.height,
+  };
+}
 
-  if (oran < esik) {
-    // Dikey ya da kareye yakın — döndürme yok.
-    fs.writeFileSync(hedefYol, data);
-    return { dondu: false, genislik: info.width, yukseklik: info.height };
-  }
+/**
+ * Prompt listesi dikey akışa göre yazılı: "output aspect ratio 3:4" ve
+ * "yataysa saat yönünde döndür / döndürülmüşse öyle bırak" cümleleri.
+ * Yatay işte döndürme cümleleri çıkarılır, oran 4:3'e çevrilir ve sona açık
+ * yön talimatı eklenir. Prompt dosyasına dokunulmaz; dikey işte metin aynen gider.
+ */
+const YATAY_TALIMAT =
+  'IMPORTANT (orientation): the reference photo is HORIZONTAL (landscape). ' +
+  'Produce a horizontal 4:3 landscape image in the same orientation as the photo. ' +
+  'Do not rotate the photo or the people; keep heads and poses upright exactly as in the photo.';
 
-  const cikti = await sharp(data).rotate(90).toBuffer({ resolveWithObject: true });
-  fs.writeFileSync(hedefYol, cikti.data);
-  return { dondu: true, genislik: cikti.info.width, yukseklik: cikti.info.height };
+export function promptuYonlendir(prompt, yatay) {
+  if (!yatay) return prompt;
+  const metin = String(prompt || '')
+    .replace(/\bIf\b[^.]*?\brotat[^.]*\.?/gi, '')
+    .replace(/\b3\s*:\s*4\b/g, '4:3')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  return `${metin}\n\n${YATAY_TALIMAT}`;
 }
 
 /** Bir task'ın hangi varyantlarda dosyası hazır? (panel kareleri için) */

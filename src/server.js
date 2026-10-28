@@ -101,6 +101,7 @@ function jobOzet(job) {
     outputDir: job.outputDir,
     inputFile: job.inputImage ? path.basename(job.inputImage) : null,
     inputDonduruldu: Boolean(job.inputDonduruldu),
+    inputYatay: Boolean(job.inputYatay),
     inputBoyut: job.inputBoyut || null,
     varyantlar: varyantSayilari(job),
     tasks: job.tasks.map((t) => ({

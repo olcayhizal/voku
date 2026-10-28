@@ -541,14 +541,25 @@ Job açılırken fotoğraf job klasörüne alınırken iki adımdan geçer
 (`girdiyiHazirla`, `src/varyant.js`):
 1. **EXIF yönü uygulanır** — telefon fotoğrafları çoğu zaman dönük saklanır;
    ham piksel boyutuna bakmadan önce bu düzeltilmeli.
-2. **Belirgin yatay ise saat yönünde 90° döndürülür** — genişlik/yükseklik
-   oranı `girdiYatayOrani` (varsayılan 1.2 = %20) eşiğini aşmalı; kareye yakın
-   fotoğraflar döndürülmez.
-   Üretim her zaman dikey çerçeveden başlar.
+2. **Belirgin yatay ise iş yatay işaretlenir, fotoğraf DÖNDÜRÜLMEZ** —
+   genişlik/yükseklik oranı `girdiYatayOrani` (varsayılan 1.2 = %20) eşiğini
+   aşmalı; kareye yakın fotoğraflar dikey sayılır.
 
-Sonuç `job.inputDonduruldu` / `job.inputBoyut` alanlarına yazılır, panelde
-künyede görünür. Görsel işlenemezse (bozuk/desteklenmeyen format) ham kopya
-ile devam edilir — job açılamamaktansa döndürmesiz devam etmek yeğdir.
+**Yatay iş (2026-10-28):** eskiden yatay fotoğraf saat yönünde 90° çevrilip
+dikey üretiliyordu; model yan yatmış sahneyi düzeltmeye çalışınca kafa ve
+duruşlar yamuluyordu (sahadan gelen şikâyet). Artık yatay üretilir:
+- `promptuYonlendir` (varyant.js) yatay işte prompt'taki "If … rotat…"
+  cümlelerini çıkarır, `3:4` → `4:3` yapar, sona açık yatay talimatı ekler.
+  Prompt dosyasına dokunulmaz; dikey işte metin aynen gider. Runner her iki
+  çağrı yolunda uygular, adapter'a `yatay` bayrağı da geçer.
+- fal: yatay işte `landscape_4_3` / `4:3`.
+- Codex yerelde sınandı: prompt-01 ile 1448×1086 (tam 4:3) dik pozlu çıktı.
+- Baskı aşağıda: yatay çıktı tuvale çevrilerek oturur, ürün değişmez.
+
+Sonuç `job.inputYatay` / `job.inputBoyut` alanlarına yazılır, künyede
+"· yatay" görünür. Eski işlerde `job.inputDonduruldu` kalır (girdisi çevrilmiş,
+çıktısı dikey; "↻ döndürüldü"). Görsel işlenemezse (bozuk/desteklenmeyen
+format) ham kopya ile devam edilir.
 
 ## Varyantlar (uretim / demo / baski)
 Her job klasöründe üç alt klasör var; **dosya adları üçünde de aynıdır**,
@@ -567,15 +578,19 @@ oranını koruduğu için baskı genişliği doğrudan bu orandan doğar: yükse
 fark otomatik telafi ediliyor (logo görünür biçimde kaymaz).
 
 **Baskı üretimi** (`baskiUret`, kaynak **uretim/** — demo damgası karışmaz):
-1. Şablon seçilir: `job.inputDonduruldu` ? `assets/baski/yatay.png` :
-   `assets/baski/dikey.png`. İkisi de 898×1181 dikey tuval; fark logo yönünde
-   (dikeyde "VOKU" altta yatay, yatayda sol kenarda dik — ürün çevrilince okunur).
+1. Yön belirlenir: yatay işin (`job.inputYatay`) yatay çıktısı saat yönünde
+   90° çevrilir. Şablon: çevrildiyse ya da eski döndürülmüş işse
+   (`job.inputDonduruldu`) `assets/baski/yatay.png`, değilse `dikey.png`
+   (yatay işte model dikey verdiyse görsel düz, şablon dikey). İkisi de
+   898×1181 dikey tuval; fark logo yönünde (dikeyde "VOKU" altta yatay,
+   yatayda sol kenarda dik — ürün çevrilince okunur). Yeni yatay akışın
+   baskısı eski döndürmeli akışla piksel piksel aynı (sınandı, fark 0).
 2. Görsel tuvale **cover** ile yerleşir: en-boy oranı korunur (eğilme/büzülme
    yok), taşan kısım kırpılır (boşluk kalmaz). Kırpma **merkezden** (`centre`): seri baskılarda kadrajın işten işe aynı
    kalması, içerik odaklı `attention` kırpmasına tercih edildi (2026-07-24 kararı).
 3. Şablon üste bindirilir.
 4. Transfer baskı için ayna alınır, eksen ürünün yönüne göre:
-   dikey iş → **flop** (sol ↔ sağ), döndürülmüş iş → **flip** (üst ↔ alt).
+   dikey şablon → **flop** (sol ↔ sağ), yatay şablon → **flip** (üst ↔ alt).
 
 **sharp tuzağı:** işlemler çağrı sırasına göre değil, sabit boru hattı
 sırasına göre uygulanır ve **composite, flip/flop'tan sonra gelir**. Aynı

@@ -3,7 +3,7 @@ import { adaptorAl } from './adapters/index.js';
 import * as falAdaptoru from './adapters/fal.js';
 import * as tarayiciYedegi from './adapters/chatgpt-tarayici.js';
 import { jobYaz, manifestYaz, durumuHesapla } from './store.js';
-import { varyantDizini, taskVaryantlariniUret } from './varyant.js';
+import { varyantDizini, taskVaryantlariniUret, promptuYonlendir } from './varyant.js';
 import * as havuz from './havuz.js';
 import { log } from './logger.js';
 
@@ -107,7 +107,8 @@ async function taskiIsleHavuz(job, task, adaptor, platformAdi, platform, hesapla
       log.info(`[${platformAdi}:${hesap.ad}] ${task.id} → üretim (deneme ${task.attempts}/${ayarlar.maxAttempts})`);
       const dosyalar = await etkinAdaptor.uret(null, {
         imagePath: job.inputImage,
-        prompt: task.prompt,
+        prompt: promptuYonlendir(task.prompt, job.inputYatay),
+        yatay: Boolean(job.inputYatay),
         promptId: task.promptId,
         outDir: varyantDizini(job, 'uretim'),
         baseName: `${task.id}-${platformAdi}`,
@@ -281,7 +282,8 @@ async function taskiIsleBasit(job, task, page, adaptor, platformAdi, sel, ayarla
     try {
       const dosyalar = await adaptor.uret(page, {
         imagePath: job.inputImage,
-        prompt: task.prompt,
+        prompt: promptuYonlendir(task.prompt, job.inputYatay),
+        yatay: Boolean(job.inputYatay),
         promptId: task.promptId,
         outDir: varyantDizini(job, 'uretim'),
         baseName: `${task.id}-${platformAdi}`,

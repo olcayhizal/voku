@@ -92,19 +92,19 @@ export async function jobOlustur({ imagePath, phone, prompts, note, kaynak, kayn
   varyantlariHazirla(outputDir); // uretim / demo / baski
 
   // Input fotoğrafı çıktı klasörüne alınır — kaynak sonradan silinse de job
-  // çalışır. Yatay fotoğraf burada dikeye çevrilir; üretim hep dikey başlar.
+  // çalışır. Yatay fotoğraf çevrilmez, yatay üretilir (bkz. girdiyiHazirla).
   const inputKopya = path.join(outputDir, `input${path.extname(foto) || '.jpg'}`);
   let girdi;
   try {
     girdi = await girdiyiHazirla(foto, inputKopya, { yatayEsigi });
-    if (girdi.dondu) {
-      log.info(`${id}: yatay fotoğraf saat yönünde 90° döndürüldü → ${girdi.genislik}×${girdi.yukseklik}`);
+    if (girdi.yatay) {
+      log.info(`${id}: yatay fotoğraf (${girdi.genislik}×${girdi.yukseklik}) — döndürülmeden yatay üretilecek`);
     }
   } catch (e) {
     // Görsel işlenemiyorsa (bozuk/desteklenmeyen format) ham kopya ile devam et.
     log.warn(`${id}: girdi fotoğrafı işlenemedi (${e.message}) — olduğu gibi kopyalanıyor`);
     fs.copyFileSync(foto, inputKopya);
-    girdi = { dondu: false, genislik: null, yukseklik: null };
+    girdi = { dondu: false, yatay: false, genislik: null, yukseklik: null };
   }
 
   const tasks = [];
@@ -138,6 +138,7 @@ export async function jobOlustur({ imagePath, phone, prompts, note, kaynak, kayn
     sourceImage: foto,
     inputImage: inputKopya,
     inputDonduruldu: girdi.dondu,
+    inputYatay: girdi.yatay,
     inputBoyut: girdi.genislik ? { genislik: girdi.genislik, yukseklik: girdi.yukseklik } : null,
     outputDir,
     status: 'pending',
