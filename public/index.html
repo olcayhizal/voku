@@ -22,6 +22,7 @@
     <button class="tab" role="tab" data-view="baski-odasi" aria-selected="false">
       Baskı odası<span class="tab-rozet gizli" id="odaRozet">0</span>
     </button>
+    <button class="tab" role="tab" data-view="hizli-oda" aria-selected="false">Hızlı oda</button>
   </nav>
 
   <nav class="tabs tabs-kurulum" role="tablist">
@@ -165,6 +166,38 @@
       <div class="tabaka">
         <div id="sayfaDetay"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Hızlı oda: işe bağlı olmayan görseller → sırala → A4 .etdx -->
+  <section class="view gizli" id="view-hizli-oda">
+    <div class="isler-duzen">
+      <aside class="kuyruk hizli-panel">
+        <div class="kuyruk-baslik">
+          <h2>Hızlı oda</h2>
+        </div>
+        <label class="birak hizli-birak" id="hizliBirak" for="hizliInput">
+          <input type="file" id="hizliInput" accept="image/*" multiple hidden />
+          <span class="birak-baslik">Görselleri bırak</span>
+          <span class="alt-metin">ya da tıkla, seç. Birden çok dosya olur.</span>
+        </label>
+        <div class="hizli-yukleme gizli" id="hizliYukleme" role="status" aria-live="polite"></div>
+
+        <label class="hizli-ayar">
+          <input type="checkbox" id="hizliHazirla" checked />
+          <span>VOKU şablonu + ayna</span>
+        </label>
+        <p class="alt-metin hizli-ayar-not">
+          Açıkken her görsel işlerdeki baskı hattından geçer: logo bindirilir,
+          transfer için aynalanır, yatay görsel çevrilir. Logosu ve aynası
+          hazır dosya yüklüyorsan kapat.
+        </p>
+
+        <p class="hizli-ozet" id="hizliOzet"></p>
+        <button type="button" class="btn btn-ikincil btn-kucuk btn-tehlike gizli" id="hizliTemizle">Listeyi temizle</button>
+      </aside>
+
+      <div class="hizli-sayfalar" id="hizliSayfalar"></div>
     </div>
   </section>
 </main>

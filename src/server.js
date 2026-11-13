@@ -20,6 +20,16 @@ import {
 import { jobuCalistir, taskiFalIleCalistir } from './runner.js';
 import { varyantSayilari, taskVaryantDurumu, onizlemeYolu } from './varyant.js';
 import { odaOzeti, sayfaBul, sayfayiBas, basimiGeriAl, etdxUret } from './sayfa.js';
+import {
+  hizliOdaOzeti,
+  gorselEkle as hizliGorselEkle,
+  siraKaydet as hizliSiraKaydet,
+  ayarKaydet as hizliAyarKaydet,
+  gorselSil as hizliGorselSil,
+  hepsiniTemizle as hizliTemizle,
+  onizlemeYolu as hizliOnizlemeYolu,
+  hizliEtdxUret,
+} from './hizli-oda.js';
 import { contextAc, sayfaAl } from './browser.js';
 import { adaptorAl } from './adapters/index.js';
 import * as falAdaptoru from './adapters/fal.js';
@@ -221,6 +231,18 @@ async function govdeOku(req, limitMb = 40) {
   }
   if (!parcalar.length) return {};
   return JSON.parse(Buffer.concat(parcalar).toString('utf8'));
+}
+
+/** Ham gövde (dosya yükleme) — JSON değil, doğrudan bayt. */
+async function hamGovdeOku(req, limitMb = 60) {
+  const parcalar = [];
+  let boyut = 0;
+  for await (const p of req) {
+    boyut += p.length;
+    if (boyut > limitMb * 1024 * 1024) throw new Error(`Dosya çok büyük (>${limitMb}MB).`);
+    parcalar.push(p);
+  }
+  return Buffer.concat(parcalar);
 }
 
 /** Bir hesabın oturum durumu (giriş yapılmış mı, giriş süreci akıyor mu). */
@@ -706,6 +728,50 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
       klasorler[ad] = (await dizinBoyutu(path.join(ROOT, ad))).bayt;
     }
     return json(res, 200, { profiller, klasorler, sonTemizlik: son });
+  }
+
+  // --- hızlı oda: işe bağlı olmayan görselleri .etdx'e diz ---
+  if (parcalar[1] === 'hizli-oda') {
+    const alt = parcalar[2];
+    try {
+      if (!alt && req.method === 'GET') return json(res, 200, hizliOdaOzeti());
+      if (!alt && req.method === 'DELETE') return json(res, 200, hizliTemizle());
+      if (alt === 'gorsel' && !parcalar[3] && req.method === 'POST') {
+        const veri = await hamGovdeOku(req);
+        return json(res, 200, await hizliGorselEkle(url.searchParams.get('ad'), veri));
+      }
+      if (alt === 'gorsel' && parcalar[3] && req.method === 'DELETE') {
+        return json(res, 200, hizliGorselSil(decodeURIComponent(parcalar[3])));
+      }
+      if (alt === 'onizleme' && parcalar[3] && req.method === 'GET') {
+        return dosyaServisEt(res, hizliOnizlemeYolu(decodeURIComponent(parcalar[3])));
+      }
+      if (alt === 'sira' && req.method === 'POST') {
+        const govde = await govdeOku(req);
+        return json(res, 200, hizliSiraKaydet(govde.idler));
+      }
+      if (alt === 'ayar' && req.method === 'POST') {
+        const govde = await govdeOku(req);
+        return json(res, 200, hizliAyarKaydet(govde));
+      }
+      // .etdx doğrudan yanıt olarak döner — üret + indir tek istek.
+      if (alt === 'etdx' && req.method === 'POST') {
+        const govde = await govdeOku(req);
+        const sonuc = await hizliEtdxUret(govde.sayfa);
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${sonuc.ad}"`,
+          'content-length': fs.statSync(sonuc.yol).size,
+          'x-etdx-ad': sonuc.ad,
+        });
+        // Dosya indirmeyle teslim edilir; sunucuda birikmesin.
+        res.on('close', () => fs.rm(sonuc.yol, { force: true }, () => {}));
+        return fs.createReadStream(sonuc.yol).pipe(res);
+      }
+    } catch (e) {
+      return json(res, 400, { hata: String(e?.message || e) });
+    }
+    return json(res, 404, { hata: 'Bilinmeyen hızlı oda eylemi' });
   }
 
   // --- baskı odası ---

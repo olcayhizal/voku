@@ -26,6 +26,8 @@ const state = {
   disErisim: null, // { acik, adres, paylasimLinki } — tünel açık mı
   kaydedilmedi: false,
   yeniFoto: null, // { base64, ad }
+  hizli: null, // { hazirla, grupBoyutu, kalemler: [{ id, ad, genislik, yukseklik }] }
+  hizliSurukle: null, // sürüklenen kalemin id'si
 };
 
 const VARYANTLAR = [
@@ -137,6 +139,7 @@ $$('.tab').forEach((tab) => {
     $(`#view-${tab.dataset.view}`).classList.remove('gizli');
     // Baskı odası kuyruğu iş detayındaki seçimlere bağlı — her açılışta tazele.
     if (tab.dataset.view === 'baski-odasi') odayiYukle();
+    if (tab.dataset.view === 'hizli-oda') hizliYukle();
   });
 });
 
@@ -2476,6 +2479,293 @@ async function baslat() {
     if (limitVar) oturumlariCiz();
   }, 20000);
 }
+
+/* ================= HIZLI ODA ================= */
+// İşe bağlı olmayan görseller: bırak → sürükleyerek sırala → her 6'lık dilim
+// bir A4 .etdx. Slot sırası kâğıtta soldan sağa, yukarıdan aşağı.
+
+async function hizliYukle() {
+  try {
+    state.hizli = await api('/api/hizli-oda');
+  } catch (e) {
+    hizliDurum(`Liste alınamadı: ${e.message}`, true);
+  }
+  hizliCiz();
+}
+
+function hizliDurum(metin, hata = false) {
+  const kutu = $('#hizliYukleme');
+  kutu.textContent = metin || '';
+  kutu.classList.toggle('gizli', !metin);
+  kutu.classList.toggle('hata', hata);
+}
+
+/** Dosyaları sırayla yükler — paralel yükleme liste kaydını yarıştırırdı. */
+async function hizliDosyaEkle(dosyalar) {
+  const liste = [...dosyalar].filter((d) => d.type.startsWith('image/') || /\.(heic|heif)$/i.test(d.name));
+  if (!liste.length) {
+    hizliDurum('Görsel dosyası bulunamadı — jpg, png, webp, heic bırak.', true);
+    return;
+  }
+  const hatalar = [];
+  for (let i = 0; i < liste.length; i++) {
+    const d = liste[i];
+    hizliDurum(`${i + 1}/${liste.length} yükleniyor — ${d.name}`);
+    try {
+      const yanit = await fetch(`/api/hizli-oda/gorsel?ad=${encodeURIComponent(d.name)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: d,
+      });
+      const veri = await yanit.json().catch(() => null);
+      if (!yanit.ok) throw new Error(veri?.hata || `yükleme başarısız (${yanit.status})`);
+      state.hizli = veri;
+      hizliCiz();
+    } catch (e) {
+      hatalar.push(`${d.name}: ${e.message}`);
+    }
+  }
+  if (hatalar.length) hizliDurum(`${hatalar.length} dosya eklenemedi — ${hatalar[0]}`, true);
+  else hizliDurum(`✓ ${liste.length} görsel eklendi`);
+  setTimeout(() => { if (!hatalar.length) hizliDurum(''); }, 2500);
+}
+
+/** Kalemi `hedef` sırasına taşır (iyimser çizim, sonra sunucuya yazılır). */
+async function hizliTasi(id, hedef) {
+  const kalemler = state.hizli.kalemler;
+  const eski = kalemler.findIndex((k) => k.id === id);
+  if (eski < 0) return;
+  const yeni = Math.max(0, Math.min(kalemler.length - 1, hedef));
+  if (eski === yeni) return;
+  const [k] = kalemler.splice(eski, 1);
+  kalemler.splice(yeni, 0, k);
+  hizliCiz();
+  try {
+    state.hizli = await api('/api/hizli-oda/sira', { method: 'POST', body: { idler: kalemler.map((x) => x.id) } });
+  } catch (e) {
+    hizliDurum(`Sıra kaydedilemedi: ${e.message}`, true);
+    await hizliYukle();
+  }
+}
+
+async function hizliSil(id) {
+  try {
+    state.hizli = await api(`/api/hizli-oda/gorsel/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    hizliCiz();
+  } catch (e) {
+    hizliDurum(e.message, true);
+  }
+}
+
+async function hizliEtdxIndir(sayfaNo, dugme) {
+  const eskiMetin = dugme.textContent;
+  dugme.disabled = true;
+  dugme.textContent = 'hazırlanıyor…';
+  try {
+    const yanit = await fetch('/api/hizli-oda/etdx', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sayfa: sayfaNo }),
+    });
+    if (!yanit.ok) {
+      const veri = await yanit.json().catch(() => null);
+      throw new Error(veri?.hata || `üretilemedi (${yanit.status})`);
+    }
+    dugme.textContent = 'indiriliyor…';
+    const blob = await yanit.blob();
+    const ad = yanit.headers.get('x-etdx-ad') || `hizli-s${sayfaNo + 1}.etdx`;
+    const url = URL.createObjectURL(blob);
+    const bag = el('a', { href: url, download: ad });
+    document.body.append(bag);
+    bag.click();
+    bag.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    dugme.textContent = `✓ indirildi (${(blob.size / 1048576).toFixed(1)} MB)`;
+  } catch (e) {
+    hizliDurum(`Sayfa ${sayfaNo + 1}: ${e.message}`, true);
+    dugme.textContent = eskiMetin;
+  } finally {
+    setTimeout(() => {
+      dugme.disabled = false;
+      if (dugme.textContent.startsWith('✓')) dugme.textContent = eskiMetin;
+    }, 2500);
+  }
+}
+
+function hizliSlot(k, sira, toplam) {
+  const no = (sira % (state.hizli.grupBoyutu || 6)) + 1;
+  if (!k) {
+    // Boş slot: buraya bırakılan kalem listenin sonuna gider.
+    return el('div', {
+      class: 'hizli-slot bos',
+      ondragover: hizliSurukleUzerinde,
+      ondragleave: (e) => e.currentTarget.classList.remove('hedef'),
+      ondrop: (e) => hizliBirak(e, toplam - 1),
+    },
+      el('span', { class: 'hizli-slot-no', text: String(no) }),
+      el('span', { class: 'hizli-slot-gorsel', text: 'boş' }),
+      el('span', { class: 'hizli-slot-alt' })
+    );
+  }
+  return el('div', {
+    class: 'hizli-slot dolu',
+    draggable: 'true',
+    title: `${k.ad}${k.genislik ? ` · ${k.genislik}×${k.yukseklik}` : ''} — sürükleyerek yerini değiştir`,
+    ondragstart: (e) => {
+      state.hizliSurukle = k.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', k.id);
+      e.currentTarget.classList.add('suruklenen');
+    },
+    ondragend: (e) => {
+      state.hizliSurukle = null;
+      e.currentTarget.classList.remove('suruklenen');
+      for (const s of $$('.hizli-slot.hedef')) s.classList.remove('hedef');
+    },
+    ondragover: hizliSurukleUzerinde,
+    ondragleave: (e) => e.currentTarget.classList.remove('hedef'),
+    ondrop: (e) => hizliBirak(e, sira),
+  },
+    el('span', { class: 'hizli-slot-no', text: String(no) }),
+    el('img', {
+      class: 'hizli-slot-gorsel',
+      src: `/api/hizli-oda/onizleme/${encodeURIComponent(k.id)}`,
+      alt: k.ad,
+      loading: 'lazy',
+    }),
+    el('span', { class: 'hizli-slot-alt' },
+      el('span', { class: 'hizli-slot-ad', text: k.ad }),
+      el('button', {
+        type: 'button', class: 'hizli-ikon', 'aria-label': `${k.ad} bir öne al`, title: 'Bir öne al',
+        disabled: sira === 0 || null, text: '◀', onclick: () => hizliTasi(k.id, sira - 1),
+      }),
+      el('button', {
+        type: 'button', class: 'hizli-ikon', 'aria-label': `${k.ad} bir arkaya al`, title: 'Bir arkaya al',
+        disabled: sira === toplam - 1 || null, text: '▶', onclick: () => hizliTasi(k.id, sira + 1),
+      }),
+      el('button', {
+        type: 'button', class: 'hizli-ikon sil', 'aria-label': `${k.ad} listeden çıkar`, title: 'Listeden çıkar',
+        text: '×', onclick: () => hizliSil(k.id),
+      })
+    )
+  );
+}
+
+function hizliSurukleUzerinde(e) {
+  // Yalnız kendi kalemlerimiz taşınır; dışarıdan dosya bırakmayı alan yakalar.
+  if (!state.hizliSurukle) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('hedef');
+}
+
+function hizliBirak(e, hedef) {
+  if (!state.hizliSurukle) return; // dosya bırakma — üst alan işler
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('hedef');
+  const id = state.hizliSurukle;
+  state.hizliSurukle = null;
+  hizliTasi(id, hedef);
+}
+
+function hizliCiz() {
+  const kap = $('#hizliSayfalar');
+  const h = state.hizli || { kalemler: [], grupBoyutu: 6, hazirla: true };
+  const boy = h.grupBoyutu || 6;
+  const kalemler = h.kalemler || [];
+  $('#hizliHazirla').checked = h.hazirla !== false;
+  $('#hizliTemizle').classList.toggle('gizli', !kalemler.length);
+  const sayfaSayisi = Math.ceil(kalemler.length / boy);
+  $('#hizliOzet').textContent = kalemler.length
+    ? `${kalemler.length} görsel · ${sayfaSayisi} A4 sayfa${kalemler.length % boy ? ` · son sayfada ${boy - (kalemler.length % boy)} boş yer` : ''}`
+    : '';
+
+  kap.replaceChildren();
+  if (!kalemler.length) {
+    kap.append(
+      el('div', { class: 'hizli-bos' },
+        el('h3', { text: 'Liste boş' }),
+        el('p', { text: 'Görselleri soldaki alana ya da buraya bırak. Her 6 görsel bir A4 sayfası olur; sürükleyerek sıralarsın, sıra kâğıttaki yerdir (soldan sağa, yukarıdan aşağı). Sayfa başına .etdx indirilir.' })
+      )
+    );
+    return;
+  }
+
+  for (let s = 0; s < sayfaSayisi; s++) {
+    const dilim = kalemler.slice(s * boy, (s + 1) * boy);
+    const slotlar = [];
+    for (let i = 0; i < boy; i++) {
+      slotlar.push(hizliSlot(dilim[i] || null, s * boy + i, kalemler.length));
+    }
+    kap.append(
+      el('section', { class: 'hizli-sayfa', 'aria-label': `Sayfa ${s + 1}` },
+        el('div', { class: 'hizli-sayfa-basi' },
+          el('span', { class: 'a4-harita', 'aria-hidden': 'true' },
+            ...Array.from({ length: boy }, (_, i) => el('i', { class: i < dilim.length ? 'dolu' : '' }))
+          ),
+          el('div', {},
+            el('h3', { text: `Sayfa ${s + 1}` }),
+            el('span', { class: 'hizli-sayfa-bilgi', text: `${dilim.length}/${boy} görsel · A4` })
+          ),
+          el('button', {
+            type: 'button',
+            class: 'btn btn-birincil btn-kucuk',
+            text: '.etdx indir',
+            onclick: (e) => hizliEtdxIndir(s, e.currentTarget),
+          })
+        ),
+        el('div', { class: 'hizli-slotlar' }, ...slotlar)
+      )
+    );
+  }
+}
+
+$('#hizliInput').addEventListener('change', (e) => {
+  hizliDosyaEkle(e.target.files);
+  e.target.value = ''; // aynı dosya tekrar seçilebilsin
+});
+
+// Dosya bırakma: sol alan ve sayfaların tamamı kabul eder.
+for (const hedef of [$('#hizliBirak'), $('#hizliSayfalar')]) {
+  const isaret = hedef.id === 'hizliBirak' ? 'uzerinde' : 'dosya-uzerinde';
+  hedef.addEventListener('dragover', (e) => {
+    if (state.hizliSurukle || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    hedef.classList.add(isaret);
+  });
+  hedef.addEventListener('dragleave', (e) => {
+    if (!hedef.contains(e.relatedTarget)) hedef.classList.remove(isaret);
+  });
+  hedef.addEventListener('drop', (e) => {
+    hedef.classList.remove(isaret);
+    if (state.hizliSurukle || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    hizliDosyaEkle(e.dataTransfer.files);
+  });
+}
+
+$('#hizliHazirla').addEventListener('change', async (e) => {
+  try {
+    state.hizli = await api('/api/hizli-oda/ayar', { method: 'POST', body: { hazirla: e.target.checked } });
+  } catch (err) {
+    hizliDurum(err.message, true);
+  }
+  hizliCiz();
+});
+
+$('#hizliTemizle').addEventListener('click', async () => {
+  const n = state.hizli?.kalemler?.length || 0;
+  if (!confirm(`Hızlı odadaki ${n} görsel silinsin mi? Yüklenen dosyalar da gider.`)) return;
+  try {
+    state.hizli = await api('/api/hizli-oda', { method: 'DELETE' });
+    hizliDurum('');
+  } catch (e) {
+    hizliDurum(e.message, true);
+  }
+  hizliCiz();
+});
 
 baslat().catch((e) => {
   document.body.prepend(el('p', { class: 'uyari', text: `Panel açılamadı: ${e.message}` }));

@@ -676,6 +676,24 @@ Sabitler `FOTO_MM / ORIGIN_MM / GAP_MM` (src/sayfa.js).
    üretimden sonra her fotoğrafın **kırpması tam görsele çekilip scale hedeften
    yeniden hesaplanıyor** — böylece Epson'un gösterdiği = gerçek baskı ölçüsü.
 
+## Hızlı oda (header sekmesi)
+İşe bağlı olmayan görselleri doğrudan .etdx'e dizer (`src/hizli-oda.js`).
+Görseller sürükle-bırak / dosya seçiciyle eklenir (sırayla, ham bayt —
+`POST /api/hizli-oda/gorsel?ad=`), kartlar sürüklenerek ya da ◀ ▶ ile
+sıralanır; **her 6'lık dilim bir A4 sayfası**, slot sırası kâğıtta soldan
+sağa, yukarıdan aşağı. Sayfa başına `.etdx indir` (`POST /api/hizli-oda/etdx
+{sayfa}` dosyayı doğrudan döner, sunucuda tutulmaz).
+
+- **VOKU şablonu + ayna** (varsayılan açık): görsel işlerdeki `baskiUret`
+  hattından geçer (yatay görsel 90° çevrilir, şablon, transfer aynası).
+  Kapalıyken yalnız 899×1181 tuvale cover ile oturur — logosu/aynası hazır
+  dosyalar için. Baskı halleri `baski/<id>-h|d.png` olarak önbelleklenir.
+- .etdx yazımı Baskı odasıyla ortak: `etdxDosyasiYaz` (src/sayfa.js) —
+  Epson ölçü düzeltmesi dahil.
+- Veri `hizli-oda/` (git dışı): `liste.json`, `orijinal/` (EXIF yönü işlenmiş
+  PNG), `onizleme/` (yatay görsel baskıdaki gibi çevrilmiş), `baski/`.
+- Önizleme aynasızdır (tanınabilir kalsın); aynalı hal yalnız .etdx'te.
+
 ## İş kartı göstergeleri ve süzgeç
 Kuyruktaki her iş iki ikonlu sayaç taşır (hover'da tooltip):
 - `▦ 5/7` — üretim: kaç görsel tamamlandı
