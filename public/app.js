@@ -21,6 +21,7 @@ const state = {
   sayfaSuzgec: 'tumu',
   isSuzgec: 'tumu',
   kaynakSuzgec: 'tumu',
+  satisSuzgec: 'tumu',
   telegram: null,
   disErisim: null, // { acik, adres, paylasimLinki } — tünel açık mı
   kaydedilmedi: false,
@@ -145,7 +146,7 @@ let isIstekSirasi = 0; // yavaş gelen eski yanıt yenisini ezmesin
 
 function suzgecAktifMi() {
   return Boolean(state.arama) || state.tarih.tip !== 'tumu' ||
-    state.isSuzgec !== 'tumu' || state.kaynakSuzgec !== 'tumu';
+    state.isSuzgec !== 'tumu' || state.kaynakSuzgec !== 'tumu' || state.satisSuzgec !== 'tumu';
 }
 
 function suzgecParametreleri() {
@@ -158,6 +159,7 @@ function suzgecParametreleri() {
   }
   if (state.isSuzgec !== 'tumu') p.set('is', state.isSuzgec);
   if (state.kaynakSuzgec !== 'tumu') p.set('kaynak', state.kaynakSuzgec);
+  if (state.satisSuzgec !== 'tumu') p.set('satis', state.satisSuzgec);
   return p;
 }
 
@@ -270,6 +272,14 @@ function kaynakEsliyorMu(job) {
   return (job.kaynak || 'panel') === state.kaynakSuzgec;
 }
 
+/** Satış süzgeci: iş düzeyinde "satıldı" işareti. */
+const SATIS_ETIKET = { satildi: 'satıldı', satilmadi: 'satılmadı' };
+function satisEsliyorMu(job) {
+  if (state.satisSuzgec === 'satildi') return Boolean(job.satildi);
+  if (state.satisSuzgec === 'satilmadi') return !job.satildi;
+  return true;
+}
+
 /** Yüklenirken satır yerine geçen iskelet — boş kutu bakakalmasın. */
 function iskeletSatir() {
   return el('div', { class: 'job-satir iskelet', 'aria-hidden': 'true' },
@@ -290,6 +300,7 @@ function jobListesiCiz() {
   $('#kuyrukAra').classList.toggle('gizli', !cokluIs);
   $('#tarihSuzgec').classList.toggle('gizli', !cokluIs);
   $('#isSuzgec').classList.toggle('gizli', !cokluIs);
+  $('#satisSuzgec').classList.toggle('gizli', !cokluIs);
   // Kaynak süzgeci ancak iki kaynak da kuyrukta varsa anlamlı.
   const kaynakCesidi = new Set(state.joblar.map((j) => j.kaynak || 'panel')).size;
   $('#kaynakSuzgec').classList.toggle('gizli', kaynakCesidi < 2 && state.kaynakSuzgec === 'tumu');
@@ -311,7 +322,8 @@ function jobListesiCiz() {
 
   const gorunen = state.joblar.filter(
     (j) =>
-      jobEsliyorMu(j, state.arama) && tarihEsliyorMu(j) && isDurumuEsliyorMu(j) && kaynakEsliyorMu(j)
+      jobEsliyorMu(j, state.arama) && tarihEsliyorMu(j) && isDurumuEsliyorMu(j) &&
+      kaynakEsliyorMu(j) && satisEsliyorMu(j)
   );
   if (!gorunen.length) {
     const nedenler = [
@@ -319,6 +331,7 @@ function jobListesiCiz() {
       state.tarih.tip !== 'tumu' ? TARIH_ETIKET[state.tarih.tip] : null,
       state.isSuzgec !== 'tumu' ? state.isSuzgec.replace('-', ' ') : null,
       state.kaynakSuzgec !== 'tumu' ? KAYNAK[state.kaynakSuzgec].etiket : null,
+      state.satisSuzgec !== 'tumu' ? SATIS_ETIKET[state.satisSuzgec] : null,
     ].filter(Boolean);
     kap.append(
       el('div', { class: 'bos' },
@@ -353,12 +366,20 @@ function jobListesiCiz() {
       el('span', { class: 'job-bilgi' },
         el('span', { class: 'kod-satir' },
           el('span', { class: 'kod', text: job.id }),
-          el('span', {
-            class: `kaynak-rozet k-${job.kaynak || 'panel'}`,
-            title: job.kaynakBilgi?.kullanici
-              ? `${kaynakBilgisi(job).ipucu} — ${job.kaynakBilgi.kullanici}`
-              : kaynakBilgisi(job).ipucu,
-          }, kaynakBilgisi(job).isaret, kaynakBilgisi(job).etiket)
+          el('span', { class: 'rozetler' },
+            job.satildi
+              ? el('span', {
+                  class: 'satis-rozet',
+                  title: job.satildiAt ? `Satıldı — ${tarih(job.satildiAt)}` : 'Satıldı',
+                }, '✓', 'Satıldı')
+              : null,
+            el('span', {
+              class: `kaynak-rozet k-${job.kaynak || 'panel'}`,
+              title: job.kaynakBilgi?.kullanici
+                ? `${kaynakBilgisi(job).ipucu} — ${job.kaynakBilgi.kullanici}`
+                : kaynakBilgisi(job).ipucu,
+            }, kaynakBilgisi(job).isaret, kaynakBilgisi(job).etiket)
+          )
         ),
         el('span', { class: 'satir-alt' },
           el('span', { text: job.note || (job.phone ? 'telefonlu' : 'kod üretildi') }),
@@ -601,10 +622,13 @@ function jobDetayCiz() {
     el('div', { class: 'tabaka-bilgi' },
       el('div', { class: 'kod-satir' },
         el('div', { class: 'kod', text: job.id }),
-        el('span', {
-          class: `kaynak-rozet k-${job.kaynak || 'panel'}`,
-          title: kaynakBilgisi(job).ipucu,
-        }, kaynakBilgisi(job).isaret, kaynakBilgisi(job).etiket)
+        el('span', { class: 'rozetler' },
+          job.satildi ? el('span', { class: 'satis-rozet', title: 'Satıldı' }, '✓', 'Satıldı') : null,
+          el('span', {
+            class: `kaynak-rozet k-${job.kaynak || 'panel'}`,
+            title: kaynakBilgisi(job).ipucu,
+          }, kaynakBilgisi(job).isaret, kaynakBilgisi(job).etiket)
+        )
       ),
       el('div', { class: 'kunye' },
         el('span', { text: job.phone ? `tel ${job.phone}` : 'numara verilmedi' }),
@@ -641,7 +665,10 @@ function jobDetayCiz() {
               text: `${job.inputBoyut.genislik}×${job.inputBoyut.yukseklik}${job.inputDonduruldu ? ' ↻ döndürüldü' : job.inputYatay ? ' · yatay' : ''}`,
             })
           : null,
-        job.note ? el('span', { text: job.note }) : null
+        job.note ? el('span', { text: job.note }) : null,
+        job.satildi && job.satildiAt
+          ? el('span', { class: 'kunye-satildi', text: `satıldı ${tarih(job.satildiAt)}` })
+          : null
       )
     ),
     el('div', { class: 'tabaka-eylem' },
@@ -665,6 +692,18 @@ function jobDetayCiz() {
             onclick: () => jobTekrar(job.id, {}),
           })
         : null,
+      el('button', {
+        class: `btn btn-kucuk btn-satis${job.satildi ? ' satildi' : ' btn-ikincil'}`,
+        'aria-pressed': String(Boolean(job.satildi)),
+        disabled: job.kosuyor || null,
+        title: job.kosuyor
+          ? 'İş çalışıyor — bitince işaretlenebilir'
+          : job.satildi
+            ? 'Satış işaretini kaldırmak için tıkla'
+            : 'Bu işi satıldı olarak işaretle',
+        text: job.satildi ? '✓ Satıldı' : 'Satıldı olarak işaretle',
+        onclick: () => satisIsaretle(job.id, !job.satildi),
+      }),
       el('button', { class: 'btn btn-ikincil btn-kucuk', text: 'Klasörü aç', onclick: () => api(`/api/jobs/${job.id}/reveal`, { method: 'POST' }) }),
       job.waLink
         ? el('a', {
@@ -875,6 +914,18 @@ async function baskiSecimi(jobId, dosya, degisim) {
   }
 }
 
+/** İş düzeyinde satış işareti — sunucu güncel job'ı geri döner. */
+async function satisIsaretle(jobId, satildi) {
+  try {
+    const guncel = await api(`/api/jobs/${jobId}/satis`, { method: 'POST', body: { satildi } });
+    jobUpsert(guncel);
+    jobListesiCiz();
+    jobDetayCiz();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 async function jobDurdur(id) {
   try {
     await api(`/api/jobs/${id}/stop`, { method: 'POST' });
@@ -954,11 +1005,22 @@ $('#kaynakSuzgec').addEventListener('click', (e) => {
   isleriYukle();
 });
 
+$('#satisSuzgec').addEventListener('click', (e) => {
+  const d = e.target.closest('button[data-satis]');
+  if (!d) return;
+  state.satisSuzgec = d.dataset.satis;
+  for (const b of $$('#satisSuzgec button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.satis === state.satisSuzgec));
+  }
+  isleriYukle();
+});
+
 function suzgecleriTemizle() {
   state.arama = '';
   state.tarih = { tip: 'tumu', bas: '', bit: '' };
   state.isSuzgec = 'tumu';
   state.kaynakSuzgec = 'tumu';
+  state.satisSuzgec = 'tumu';
   $('#kuyrukAra').value = '';
   $('#tarihBas').value = '';
   $('#tarihBit').value = '';
@@ -967,6 +1029,9 @@ function suzgecleriTemizle() {
   }
   for (const b of $$('#kaynakSuzgec button')) {
     b.setAttribute('aria-pressed', String(b.dataset.kaynak === 'tumu'));
+  }
+  for (const b of $$('#satisSuzgec button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.satis === 'tumu'));
   }
   tarihSegmentiCiz();
   isleriYukle();

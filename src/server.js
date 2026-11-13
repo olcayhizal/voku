@@ -120,6 +120,8 @@ function jobOzet(job) {
       baski: (t.files || []).map((d) => baskiKaydi(job, d)),
     })),
     baskiOzet: baskiOzetiCikar(job),
+    satildi: Boolean(job.satildi),
+    satildiAt: job.satildiAt || null,
   };
 }
 
@@ -174,6 +176,10 @@ function jobSayfasi(sorgu = {}) {
       return parcalar.every((p) => havuz.includes(p));
     });
   }
+
+  // Satış süzgeci: iş düzeyinde "satıldı" işareti (bkz. POST /satis).
+  if (sorgu.satis === 'satildi') liste = liste.filter((j) => j.satildi);
+  else if (sorgu.satis === 'satilmadi') liste = liste.filter((j) => !j.satildi);
 
   if (sorgu.is && sorgu.is !== 'tumu') {
     liste = liste.filter((j) => {
@@ -905,6 +911,7 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
       bit: s.get('bit') || '',
       is: s.get('is') || 'tumu',
       kaynak: s.get('kaynak') || 'tumu',
+      satis: s.get('satis') || 'tumu',
     }));
   }
 
@@ -1061,6 +1068,19 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
         kayit.basildiAt = kayit.basildi ? simdi : null;
       }
       job.baskiSecim[govde.dosya] = kayit;
+      jobYaz(job);
+      manifestYaz(job);
+      return json(res, 200, jobOzet(job));
+    }
+
+    // İş düzeyinde satış işareti: { satildi: bool }
+    if (eylem === 'satis' && req.method === 'POST') {
+      // Runner koşarken job'ı bellekte tutup her adımda diske yazar — şimdi
+      // yazılan işaret bir sonraki adımda ezilirdi.
+      if (durum.kosanJoblar.has(job.id)) return json(res, 409, { hata: 'İş çalışıyor — bitince işaretle.' });
+      const govde = await govdeOku(req);
+      job.satildi = Boolean(govde.satildi);
+      job.satildiAt = job.satildi ? new Date().toISOString() : null;
       jobYaz(job);
       manifestYaz(job);
       return json(res, 200, jobOzet(job));

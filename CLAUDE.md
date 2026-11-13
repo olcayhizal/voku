@@ -196,6 +196,14 @@ Panelde kuyruk kartlarında rozet, üstte **Tümü / Panel / Telegram** süzgeci
 (iki kaynak birden varsa görünür), iş detayında kaynak + Telegram kullanıcısı
 + teslim durumu.
 
+## Satış işareti (iş düzeyinde)
+`job.satildi` + `job.satildiAt` (manifest'te de). İş detayında **"Satıldı olarak
+işaretle"** düğmesi (tekrar tıklayınca geri alınır), uç `POST
+/api/jobs/<id>/satis {satildi}`. Kuyrukta turuncu **✓ Satıldı** rozeti, üstte
+**Tümü / Satılmadı / ✓ Satıldı** süzgeci (`?satis=`, sunucuda süzülür). İş
+koşarken uç 409 döner: runner job'ı bellekte tutup her adımda diske yazdığı için
+işaret ezilirdi.
+
 ## Telegram botu
 **Bota gelen her fotoğraf bir job'dır.** Fotoğrafın yanında gelen telefon /
 isim / not job künyesine yazılır; üretim bitince **demo kareler tek seferde**,

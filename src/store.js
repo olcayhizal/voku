@@ -133,6 +133,8 @@ export function manifestYaz(job) {
       baski: (t.files || []).map((d) => baskiKaydi(job, d)),
     })),
     baskiOzet: baskiOzetiCikar(job),
+    satildi: Boolean(job.satildi),
+    satildiAt: job.satildiAt || null,
   };
   fs.mkdirSync(job.outputDir, { recursive: true });
   fs.writeFileSync(

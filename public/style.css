@@ -171,7 +171,7 @@ h3 {
 }
 .durum-suzgec button { padding: 6px 3px; font-size: 10.5px; white-space: nowrap; }
 #isSuzgec { grid-template-columns: repeat(4, 1fr); }
-#kaynakSuzgec { grid-template-columns: repeat(3, 1fr); }
+#kaynakSuzgec, #satisSuzgec { grid-template-columns: repeat(3, 1fr); }
 .kunye-basildi { color: var(--fixer); }
 .kare-sayfa-git { padding: 5px 7px; border-top: 1px solid var(--edge); width: 100%; text-align: left; }
 
@@ -507,6 +507,24 @@ main { padding: 22px 20px 26px; max-width: 1360px; margin: 0 auto; }
   border-radius: 2px;
   color: var(--paper-dim);
   cursor: help;
+}
+.rozetler { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+/* satış: iş düzeyinde bitiş işareti — safelight, kuyrukta göze ilk o çarpsın */
+.satis-rozet {
+  display: inline-flex; align-items: center; gap: 3px; flex: none;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--safelight) 55%, var(--edge));
+  border-radius: 2px;
+  color: var(--safelight);
+  cursor: help;
+}
+.kunye-satildi { color: var(--safelight); }
+.btn-satis.satildi {
+  background: var(--safelight-loş);
+  border-color: var(--safelight);
+  color: #fff2df;
 }
 .kaynak-rozet.k-telegram { color: var(--fixer); border-color: color-mix(in srgb, var(--fixer) 45%, var(--edge)); }
 .job-satir .satir-alt {
