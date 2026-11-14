@@ -172,6 +172,7 @@ h3 {
 .durum-suzgec button { padding: 6px 3px; font-size: 10.5px; white-space: nowrap; }
 #isSuzgec { grid-template-columns: repeat(4, 1fr); }
 #kaynakSuzgec, #satisSuzgec { grid-template-columns: repeat(3, 1fr); }
+.satis-sifirla { width: 100%; margin: -2px 0 8px; }
 .kunye-basildi { color: var(--fixer); }
 .kare-sayfa-git { padding: 5px 7px; border-top: 1px solid var(--edge); width: 100%; text-align: left; }
 

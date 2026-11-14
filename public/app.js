@@ -7,6 +7,7 @@ const state = {
   platformlar: [],
   joblar: [], // yüklü pencere — kuyruk sunucudan sayfa sayfa gelir
   jobToplam: 0, // aktif süzgeçlerle eşleşen toplam iş (sunucu sayar)
+  satildiSayisi: 0, // süzgeçten bağımsız, satıldı işaretli iş sayısı
   jobYukleniyor: false, // ilk sayfa/süzgeç yüklemesi (iskelet gösterilir)
   jobDahaYukleniyor: false, // "daha fazla" düğmesi dönüyor
   promptlar: [],
@@ -188,6 +189,7 @@ async function isleriYukle({ ekle = false, tazele = false } = {}) {
     const sayfa = await api(`/api/jobs?${p}`);
     if (istek !== isIstekSirasi) return; // daha yeni bir istek yolda
     state.jobToplam = sayfa.toplam;
+    state.satildiSayisi = sayfa.satildiSayisi ?? state.satildiSayisi;
     if (ekle) {
       const eldekiler = new Set(state.joblar.map((j) => j.id));
       state.joblar.push(...sayfa.joblar.filter((j) => !eldekiler.has(j.id)));
@@ -304,6 +306,9 @@ function jobListesiCiz() {
   $('#tarihSuzgec').classList.toggle('gizli', !cokluIs);
   $('#isSuzgec').classList.toggle('gizli', !cokluIs);
   $('#satisSuzgec').classList.toggle('gizli', !cokluIs);
+  const sifirla = $('#satisSifirla');
+  sifirla.classList.toggle('gizli', !cokluIs || state.satildiSayisi < 1);
+  sifirla.textContent = `Satıldıları sıfırla (${state.satildiSayisi})`;
   // Kaynak süzgeci ancak iki kaynak da kuyrukta varsa anlamlı.
   const kaynakCesidi = new Set(state.joblar.map((j) => j.kaynak || 'panel')).size;
   $('#kaynakSuzgec').classList.toggle('gizli', kaynakCesidi < 2 && state.kaynakSuzgec === 'tumu');
@@ -920,7 +925,11 @@ async function baskiSecimi(jobId, dosya, degisim) {
 /** İş düzeyinde satış işareti — sunucu güncel job'ı geri döner. */
 async function satisIsaretle(jobId, satildi) {
   try {
+    const onceki = state.joblar.find((j) => j.id === jobId);
     const guncel = await api(`/api/jobs/${jobId}/satis`, { method: 'POST', body: { satildi } });
+    if (Boolean(onceki?.satildi) !== Boolean(guncel.satildi)) {
+      state.satildiSayisi = Math.max(0, state.satildiSayisi + (guncel.satildi ? 1 : -1));
+    }
     jobUpsert(guncel);
     jobListesiCiz();
     jobDetayCiz();
@@ -928,6 +937,32 @@ async function satisIsaretle(jobId, satildi) {
     alert(e.message);
   }
 }
+
+/** Tüm işlerin satıldı işaretini tek seferde kaldırır (yeni güne geçiş). */
+async function satislariSifirla() {
+  const n = state.satildiSayisi;
+  if (!n) return;
+  if (!confirm(`${n} işin satıldı işareti kaldırılsın mı?`)) return;
+  const dugme = $('#satisSifirla');
+  dugme.disabled = true;
+  try {
+    const sonuc = await api('/api/jobs/satis-sifirla', { method: 'POST' });
+    await satisSifirlandiTazele();
+    if (sonuc.atlanan) alert(`${sonuc.atlanan} iş çalıştığı için atlandı — bitince tekrar sıfırla.`);
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    dugme.disabled = false;
+  }
+}
+
+async function satisSifirlandiTazele() {
+  for (const j of state.joblar) if (!j.kosuyor) { j.satildi = false; j.satildiAt = null; }
+  await isleriYukle({ tazele: true }); // sayaç + süzgeç sunucudan
+  if (state.seciliJob) jobDetayCiz();
+}
+
+$('#satisSifirla').addEventListener('click', satislariSifirla);
 
 async function jobDurdur(id) {
   try {
@@ -2336,6 +2371,7 @@ function akisiBagla() {
       jobListesiCiz();
       if (state.seciliJob === veri.id) jobDetayCiz();
     }
+    if (tip === 'satis-sifirlandi') satisSifirlandiTazele();
     if (tip === 'giris') {
       const o = oturumBul(veri.platform, veri.hesap || 'varsayılan');
       if (!o) return;
@@ -2448,6 +2484,7 @@ async function baslat() {
   state.platformlar = durum.platformlar;
   state.joblar = durum.joblar;
   state.jobToplam = durum.jobToplam ?? durum.joblar.length;
+  state.satildiSayisi = durum.satildiSayisi ?? 0;
   state.jobYukleniyor = false;
   state.telegram = durum.telegram || null;
   state.disErisim = durum.disErisim || null;

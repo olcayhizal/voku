@@ -204,6 +204,12 @@ işaretle"** düğmesi (tekrar tıklayınca geri alınır), uç `POST
 koşarken uç 409 döner: runner job'ı bellekte tutup her adımda diske yazdığı için
 işaret ezilirdi.
 
+**Toplu sıfırlama:** süzgecin altında **"Satıldıları sıfırla (N)"** düğmesi (N = süzgeçten
+bağımsız tüm satıldı işler, `satildiSayisi` `/api/jobs` ve `/api/state` yanıtında).
+`POST /api/jobs/satis-sifirla` → `{ sifirlanan, atlanan }`; koşan işler atlanır.
+İş başına `job` yayını yerine tek `satis-sifirlandi` SSE olayı (yüklü olmayan işler
+kuyruğa sokulmasın), istemci yüklü pencereyi tazeler.
+
 ## Telegram botu
 **Bota gelen her fotoğraf bir job'dır.** Fotoğrafın yanında gelen telefon /
 isim / not job künyesine yazılır; üretim bitince **demo kareler tek seferde**,

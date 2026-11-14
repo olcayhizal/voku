@@ -154,6 +154,8 @@ function jobSayfasi(sorgu = {}) {
   const limit = Math.max(0, Math.min(500, Number(sorgu.limit ?? 25) || 0));
   const offset = Math.max(0, Number(sorgu.offset) || 0);
   let liste = jobListele().reverse(); // yeniden eskiye
+  // Süzgeçten bağımsız: "Satıldıları sıfırla" düğmesi kaç iş olduğunu bilsin.
+  const satildiSayisi = liste.filter((j) => j.satildi).length;
 
   if (sorgu.kaynak && sorgu.kaynak !== 'tumu') {
     liste = liste.filter((j) => kaynakNormalize(j.kaynak) === sorgu.kaynak);
@@ -209,7 +211,7 @@ function jobSayfasi(sorgu = {}) {
     liste = liste.filter((j) => String(j.createdAt) < String(sorgu.oncesi));
   }
   const joblar = liste.slice(offset, offset + limit).map(jobOzet);
-  return { joblar, toplam, dahaVar: offset + joblar.length < liste.length };
+  return { joblar, toplam, satildiSayisi, dahaVar: offset + joblar.length < liste.length };
 }
 
 function json(res, kod, govde) {
@@ -357,6 +359,7 @@ function durumPaketi(ayarlar, islerLimit = 25) {
     platformlar: Object.values(ayarlar.platforms).map(platformDurumu),
     joblar: sayfa.joblar,
     jobToplam: sayfa.toplam,
+    satildiSayisi: sayfa.satildiSayisi,
     telegram: durum.telegram ? durum.telegram.durum() : { acik: false, hata: 'Bot bu panelde açık değil.', panelKapali: true },
     fal: falOzeti(),
     abonelik: abonelikDurumu(),
@@ -1009,6 +1012,26 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     } catch (e) {
       return json(res, 400, { hata: String(e?.message || e) });
     }
+  }
+
+  // Toplu satış sıfırlama: tüm işlerin "satıldı" işaretini kaldırır (yeni
+  // güne geçerken). Koşan işler atlanır — runner işareti ezerdi (bkz. /satis).
+  if (yol === '/api/jobs/satis-sifirla' && req.method === 'POST') {
+    let sifirlanan = 0;
+    let atlanan = 0;
+    for (const job of jobListele()) {
+      if (!job.satildi) continue;
+      if (durum.kosanJoblar.has(job.id)) { atlanan += 1; continue; }
+      job.satildi = false;
+      job.satildiAt = null;
+      jobYaz(job);
+      manifestYaz(job);
+      sifirlanan += 1;
+    }
+    log.ok(`Satış işaretleri sıfırlandı: ${sifirlanan} iş${atlanan ? ` (${atlanan} koşan iş atlandı)` : ''}`);
+    // Tek olay: iş başına 'job' yayını yüklü olmayan işleri kuyruğa sokardı.
+    yayinla('satis-sifirlandi', { sifirlanan, atlanan });
+    return json(res, 200, { sifirlanan, atlanan });
   }
 
   if (parcalar[1] === 'jobs' && parcalar[2]) {
