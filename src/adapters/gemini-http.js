@@ -528,20 +528,38 @@ async function tarayicidanIndirIc(urller, profilDizini, denemeler = null) {
       // sonra 2048, ham en son.
       const adaylar = [...new Set([`${tabani}=d`, `${tabani}=s2048`, `${tabani}=s2048-rj`, u])];
       for (const aday of adaylar) {
+        // =d asıl dosyayı "ek" olarak verir: Chrome sayfa yerine İNDİRME
+        // başlatır, goto "Download is starting" ile düşer → indirme olayından al.
+        const indirme = sayfa.waitForEvent('download', { timeout: 60000 }).catch(() => null);
         try {
-          const yanit = await sayfa.goto(aday, { waitUntil: 'load', timeout: 45000, referer: 'https://gemini.google.com/' });
-          const tip = yanit?.headers()['content-type'] || '';
-          denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), durum: yanit?.status(), tip: tip.split(';')[0] });
-          if (yanit?.ok() && tip.startsWith('image/')) {
-            const tur = tip.includes('png') ? 'png' : tip.includes('webp') ? 'webp' : 'jpeg';
-            const govde = await yanit.body();
-            const boyut = await sharp(govde).metadata().then((m) => `${m.width}×${m.height}`).catch(() => '?');
+          let govde = null;
+          let tip = '';
+          try {
+            const yanit = await sayfa.goto(aday, { waitUntil: 'load', timeout: 45000, referer: 'https://gemini.google.com/' });
+            tip = yanit?.headers()['content-type'] || '';
+            denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), durum: yanit?.status(), tip: tip.split(';')[0] });
+            if (yanit?.ok() && tip.startsWith('image/')) govde = await yanit.body();
+            else log.warn(`[gemini-http] tarayıcı indirme ${yanit?.status()} ${tip.split(';')[0]} — ${urlSekli(aday)}`);
+          } catch (e) {
+            if (!/Download is starting/i.test(e.message)) throw e;
+            const dl = await indirme;
+            const yol = dl && (await dl.path().catch(() => null));
+            if (!yol) throw new Error('indirme başladı ama dosya alınamadı');
+            govde = fs.readFileSync(yol);
+            const ad = dl.suggestedFilename() || '';
+            tip = /\.png$/i.test(ad) ? 'image/png' : /\.webp$/i.test(ad) ? 'image/webp' : 'image/jpeg';
+            denemeler?.push({ yol: 'chrome-profil-indirme', url: urlSekli(aday), dosya: path.extname(ad) });
+          }
+          if (govde) {
+            const meta = await sharp(govde).metadata().catch(() => null);
+            if (!meta?.width) throw new Error('inen dosya görsel değil');
+            const tur = meta.format === 'png' ? 'png' : meta.format === 'webp' ? 'webp' : 'jpeg';
+            const boyut = `${meta.width}×${meta.height}`;
             denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), boyut, bayt: govde.length });
             log.info(`[gemini-http] tarayıcıdan indirildi ${boyut} (${Math.round(govde.length / 1024)} KB) — ${urlSekli(aday)}`);
             sonuc.push({ tur, b64: govde.toString('base64') });
             break;
           }
-          log.warn(`[gemini-http] tarayıcı indirme ${yanit?.status()} ${tip.split(';')[0]} — ${urlSekli(aday)}`);
         } catch (e) {
           denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), hata: String(e.message).split('\n')[0] });
           log.warn(`[gemini-http] tarayıcı indirme hatası — ${urlSekli(aday)}: ${String(e.message).split('\n')[0]}`);
