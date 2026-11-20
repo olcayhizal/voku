@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 import { ROOT } from '../paths.js';
 import { calistirilabilir, komutYolu, portTutaniOldur } from '../platform.js';
 import { log } from '../logger.js';
+import { contextAc } from '../browser.js';
 
 const calistir = promisify(execFile);
 
@@ -339,6 +340,7 @@ async function servisiBaslatIc(platform, hesap, port) {
   }
 
   const cerezEnv = envDegiskenleri(env);
+  await profildenTamCerez(env, cerezEnv, hesap?.profileDir || platform?.profileDir);
   // Güncel köprü yalnız GEMINI_COOKIES (Cookie başlığı) okuyor; eski girişlerin
   // .env'inde sadece PSID/PSIDTS çifti var → çiftten başlık kur. Yetmezse
   // model listesi boş kalır ve aşağıdaki "yeniden giriş" hatası düşer; yeni
@@ -414,6 +416,62 @@ async function servisiBaslatIc(platform, hesap, port) {
   e.sebep = 'oturum';
   e.resetsAt = Date.now() + 30 * 60 * 1000;
   throw e;
+}
+
+/**
+ * gemini.google.com'a giden TAM Cookie başlığını kurar (güncel köprü
+ * GEMINI_COOKIES olarak bunu istiyor). gemini.google.com'a gönderilen
+ * çerezler: .google.com + gemini.google.com domainleri, path "/". Aynı ad iki
+ * domainde varsa .google.com'daki tutulur; PSID çifti verilen değerlerle ezilir.
+ */
+function cerezBasligiKur(cerezler, psid, psidts) {
+  const simdi = Date.now() / 1000;
+  const harita = new Map();
+  for (const c of cerezler) {
+    if (!c.value || /[;'\r\n]/.test(c.value)) continue;
+    if (c.expires > 0 && c.expires < simdi) continue;
+    if (!['.google.com', 'google.com', 'gemini.google.com', '.gemini.google.com'].includes(c.domain)) continue;
+    if ((c.path || '/') !== '/') continue;
+    const genel = c.domain === '.google.com' || c.domain === 'google.com';
+    if (!harita.has(c.name) || genel) harita.set(c.name, c.value);
+  }
+  harita.set('__Secure-1PSID', psid);
+  harita.set('__Secure-1PSIDTS', psidts);
+  return { baslik: [...harita].map(([k, v]) => `${k}=${v}`).join('; '), adet: harita.size };
+}
+
+/**
+ * Eski girişlerin .env'inde yalnız PSID/PSIDTS çifti var; güncel köprü
+ * üretilen görseli bu çiftle indiremiyor (lh3 → 403). Hesabın tarayıcı
+ * profilinde girişten kalan tam çerez seti duruyor: profil başsız açılır
+ * (sayfa yüklenmez, yalnız çerez okunur), aynı oturumsa (PSID eşit) başlık
+ * kurulup .env'e GEMINI_COOKIES olarak eklenir — yeniden giriş gerekmez.
+ * Başarısızlık sessiz: çift ile devam edilir.
+ */
+async function profildenTamCerez(envDosyasi, cerezEnv, profilDizini) {
+  if (cerezEnv.GEMINI_COOKIES || !cerezEnv.GEMINI_1PSID || !cerezEnv.GEMINI_1PSIDTS) return;
+  if (!profilDizini || !fs.existsSync(profilDizini)) return;
+  let ctx;
+  try {
+    ctx = await contextAc({ profileDir: profilDizini }, { navigationTimeoutMs: 30000 }, { headless: true });
+    const cerezler = await ctx.cookies('https://gemini.google.com');
+    const profilPsid = cerezler.find((c) => c.name === '__Secure-1PSID' && c.domain === '.google.com')?.value;
+    if (profilPsid !== cerezEnv.GEMINI_1PSID) {
+      log.warn(
+        `[gemini-http] profil çerezi .env ile aynı oturum değil (${path.basename(profilDizini)}) — tam çerez alınamadı, gerekirse yeniden giriş`
+      );
+      return;
+    }
+    const { baslik, adet } = cerezBasligiKur(cerezler, cerezEnv.GEMINI_1PSID, cerezEnv.GEMINI_1PSIDTS);
+    const mevcut = fs.readFileSync(envDosyasi, 'utf8');
+    fs.writeFileSync(envDosyasi, `${mevcut.replace(/\s*$/, '')}\nGEMINI_COOKIES='${baslik}'\n`);
+    cerezEnv.GEMINI_COOKIES = baslik;
+    log.ok(`[gemini-http] tam çerez profilden alındı (${path.basename(profilDizini)}, ${adet} çerez) → ${path.basename(envDosyasi)}`);
+  } catch (e) {
+    log.warn(`[gemini-http] profilden çerez okunamadı (${path.basename(profilDizini)}): ${String(e.message).split('\n')[0]}`);
+  } finally {
+    await ctx?.close().catch(() => {});
+  }
 }
 
 /** Tüm köprü süreçlerini kapatır (panel kapanışında). */
@@ -494,23 +552,7 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
   const korunan = taban
     .split(/\r?\n/)
     .filter((l) => l.trim() && !/^\s*(PORT|GEMINI_1PSID|GEMINI_1PSIDTS|GEMINI_COOKIES)\s*=/.test(l));
-  // Güncel köprü gemini.google.com'a giden TAM Cookie başlığını istiyor
-  // (GEMINI_COOKIES). gemini.google.com'a gönderilen çerezler: .google.com +
-  // gemini.google.com domainleri. Aynı ad iki domainde varsa .google.com'daki
-  // tutulur (PSID çifti zaten oradan seçildi).
-  const simdi = Date.now() / 1000;
-  const baslikHaritasi = new Map();
-  for (const c of cerezler) {
-    if (!c.value || /[;'\r\n]/.test(c.value)) continue;
-    if (c.expires > 0 && c.expires < simdi) continue;
-    if (!['.google.com', 'google.com', 'gemini.google.com', '.gemini.google.com'].includes(c.domain)) continue;
-    if ((c.path || '/') !== '/' ) continue;
-    const genel = c.domain === '.google.com' || c.domain === 'google.com';
-    if (!baslikHaritasi.has(c.name) || genel) baslikHaritasi.set(c.name, c.value);
-  }
-  baslikHaritasi.set('__Secure-1PSID', psid);
-  baslikHaritasi.set('__Secure-1PSIDTS', psidts);
-  const cerezBasligi = [...baslikHaritasi].map(([k, v]) => `${k}=${v}`).join('; ');
+  const { baslik: cerezBasligi, adet: cerezAdedi } = cerezBasligiKur(cerezler, psid, psidts);
   const icerik =
     [
       ...korunan,
@@ -525,7 +567,7 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
   log.ok(
     `[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} ` +
       `(${path.relative(ROOT, dosya)}) [PSID=${(kontrol.GEMINI_1PSID || '').length}b ` +
-      `PSIDTS=${(kontrol.GEMINI_1PSIDTS || '').length}b çerez-başlığı=${baslikHaritasi.size} çerez]`
+      `PSIDTS=${(kontrol.GEMINI_1PSIDTS || '').length}b çerez-başlığı=${cerezAdedi} çerez]`
   );
 
   // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun. Windows'ta
@@ -652,9 +694,16 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     // Görsel yerine metin döndüyse sebebi taşı — sessizce "başarısız" deme.
     const oz = icerik.replace(/\s+/g, ' ').trim().slice(0, 200);
     if (/!\[[^\]]*\]\(https?:/.test(icerik)) {
-      throw new Error(
-        'Köprü görseli indirmeden URL döndürdü (voku yaması uygulanmamış olabilir): patches/gemini-web-to-api.voku.patch'
+      // Görsel ÜRETİLDİ ama köprü indiremedi (lh3 → 403). Kasım 2026'da
+      // görüldü: çerez setinde yalnız PSID çifti varken. Aynı hesapta tekrar
+      // denemek kota yakar → hesabı dinlendir, havuz ötekine / fal'a geçsin.
+      const e = new Error(
+        `Gemini görseli üretti ama indirilemedi (Google 403). "${hesap?.ad || 'Gemini'}" hesabına panelden yeniden giriş yap — tam çerez gerekiyor.`
       );
+      e.limitDolu = true;
+      e.sebep = 'oturum';
+      e.resetsAt = Date.now() + 30 * 60 * 1000;
+      throw e;
     }
     throw new Error(`Gemini görsel üretmedi. Yanıt: ${oz || '(boş)'}`);
   }
