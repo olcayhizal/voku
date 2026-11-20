@@ -30,7 +30,7 @@ Telefon yoksa: `output/DD-MM-YYYY-000XXXXXXXX/` (000 ile başlayan uydurma id).
 | platform | adapter | motor | görsel başına | paralel |
 |---|---|---|---|---|
 | chatgpt | `chatgpt-codex` | Codex CLI + `image_gen` (gpt-image-2) | ~85 sn | 4 |
-| gemini | `gemini-http` | yerel `gemini-web-to-api` köprüsü (gemini-3-pro-image) | ~20 sn | 4 |
+| gemini | `gemini-http` | yerel `gemini-web-to-api` köprüsü (upstream 507f5aa'ya sabit; model hesabın listesinden: Pro → gemini-auto) | ~20 sn | 4 |
 
 Ölçülen tam koşu: **7 prompt (4 ChatGPT + 3 Gemini) → 180 sn.** Aynı iş
 ayar öncesinde (2+3 paralel, varsayılan reasoning) 364 sn sürüyordu.

@@ -36,6 +36,12 @@ const ENV_DOSYASI = path.join(SERVIS_DIZINI, '.env');
 const GWR = path.join(ROOT, 'tools', 'gwr', 'bin', 'gwr.mjs');
 const YAMA_DIZINI = path.join(ROOT, 'patches');
 const YAMA_DAMGASI = path.join(SERVIS_DIZINI, '.voku-yama');
+// Köprünün sabitlendiği upstream sürümü. Kurulumlar bu commit'e çekilir,
+// yamalar (patches/) bu sürüme göre yazılır. Kasım 2026: Temmuz sürümü
+// Google'ın yeni istek biçiminde 400 alıyordu; upstream model seçimini
+// (otAQ7b) ve istek gövdesini yeniledi → 507f5aa (17 Kas 2026).
+const KOPRU_DEPO = 'https://github.com/ntthanh2603/gemini-web-to-api.git';
+const KOPRU_SURUMU = '507f5aa244a421ec2cc10a664f4ec37eb108be54';
 
 // Çoklu hesap: her hesap ayrı portta ayrı köprü sürecidir. port → süreç.
 const koprular = new Map();
@@ -92,6 +98,27 @@ async function modelListesi(port, timeoutMs = 2500) {
 }
 
 /**
+ * Hesabın listesinden üretim modelini seçer. Güncel köprü listede olmayan adı
+ * 400 ile reddediyor ve liste hesaba göre değişiyor (Pro/Flash ya da yalnız
+ * gemini-auto). Sıra: ayardaki model listedeyse o → Pro (canvas/music değil)
+ * → gemini-auto → undefined (köprü hesabın ilk modelini kullanır).
+ * Nano Banana görseli modelden bağımsız araçla üretiliyor; Pro varsa Pro
+ * kalitesi için tercih edilir.
+ */
+export function modelSecListeden(idler, istenen) {
+  if (istenen && idler.includes(istenen)) return istenen;
+  const pro = idler.find((id) => /\bpro\b/i.test(id.replace(/[-_.]/g, ' ')) && !/canvas|music|live/i.test(id));
+  if (pro) return pro;
+  if (idler.includes('gemini-auto')) return 'gemini-auto';
+  return undefined;
+}
+
+async function modelSec(port, istenen) {
+  const idler = (await modelListesi(port, 5000)).map((m) => m?.id).filter(Boolean);
+  return modelSecListeden(idler, istenen);
+}
+
+/**
  * `.env` dosyasını okuyup GEMINI_* değişkenlerini env objesine çıkarır.
  * Regex yerine indexOf('=') + `\r?\n` bölme: Windows CRLF ve değer içindeki
  * `=` / özel karakterlere karşı dayanıklı. Yalnız DOLU değerler alınır (boş
@@ -104,7 +131,10 @@ function envDegiskenleri(dosya) {
     const i = satir.indexOf('=');
     if (i < 0) continue;
     const anahtar = satir.slice(0, i).trim();
-    const deger = satir.slice(i + 1).trim();
+    let deger = satir.slice(i + 1).trim();
+    // GEMINI_COOKIES tek tırnakla yazılır (köprünün godotenv'i ; ve boşluklu
+    // değeri bozmasın); enjeksiyonda tırnak atılır.
+    if (deger.length >= 2 && deger[0] === "'" && deger.endsWith("'")) deger = deger.slice(1, -1);
     if (/^GEMINI_[A-Z0-9_]+$/.test(anahtar) && deger) cikti[anahtar] = deger;
   }
   return cikti;
@@ -148,6 +178,39 @@ async function gitDene(...argumanlar) {
   } catch {
     return false;
   }
+}
+
+async function gitCikti(...argumanlar) {
+  try {
+    const { stdout } = await calistir('git', argumanlar, { cwd: SERVIS_DIZINI, timeout: 60000, windowsHide: true });
+    return String(stdout).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Köprü klonunu KOPRU_SURUMU'ne çeker (kurulum `--depth 1` klon, eski
+ * sürümde ve eski yamalar uygulanmış olabilir). `checkout -f` yalnız izlenen
+ * dosyaları sıfırlar; .env*, .cookies, .voku-yama gibi takipsiz dosyalar
+ * yerinde kalır. Dönüş: sürüm değişti mi.
+ */
+async function kopruSurumunuSabitle() {
+  if ((await gitCikti('rev-parse', 'HEAD')) === KOPRU_SURUMU) return false;
+  log.info(`[gemini-http] köprü ${KOPRU_SURUMU.slice(0, 7)} sürümüne taşınıyor…`);
+  const varMi = () => gitDene('cat-file', '-e', `${KOPRU_SURUMU}^{commit}`);
+  if (!(await varMi())) {
+    // GitHub erişilebilir commit'i SHA ile vermeye izin veriyor; olmazsa main'den derin çek.
+    if (!(await gitDene('fetch', '--depth', '1', KOPRU_DEPO, KOPRU_SURUMU)) || !(await varMi())) {
+      await gitDene('fetch', '--depth', '300', KOPRU_DEPO, 'main');
+    }
+    if (!(await varMi())) throw new Error(`köprü sürümü ${KOPRU_SURUMU.slice(0, 7)} GitHub'dan çekilemedi (ağ?)`);
+  }
+  if (!(await gitDene('checkout', '-f', '--detach', KOPRU_SURUMU))) {
+    throw new Error(`köprü ${KOPRU_SURUMU.slice(0, 7)} sürümüne geçirilemedi (git checkout)`);
+  }
+  log.ok(`[gemini-http] köprü kaynağı ${KOPRU_SURUMU.slice(0, 7)} sürümünde`);
+  return true;
 }
 
 /**
@@ -197,7 +260,8 @@ async function kopruyuDerle() {
  * derlenir — kurulumda kimsenin betik çalıştırması gerekmez.
  * Örnek: Google Ekim 2026'da gemini.google.com yanıtını brotli'ye çevirdi;
  * `br` isteyip yalnız gzip açan köprü sayfayı okuyamadı ("SNlM0e not found"),
- * yeniden giriş çözmedi (sikistirma yaması).
+ * yeniden giriş çözmedi (sikistirma yaması; upstream'de de var, 507f5aa'ya
+ * geçilince kaldırıldı).
  * Başarısızlık köprüyü durdurmaz: eldeki binary ile devam edilir, damga
  * yazılmaz, sonraki açılışta yeniden denenir.
  */
@@ -217,12 +281,16 @@ async function kopruyuGuncelTutIc() {
     .readdirSync(YAMA_DIZINI)
     .filter((f) => /^gemini-web-to-api.*\.patch$/.test(f))
     .sort();
-  const ozet = crypto.createHash('sha256');
+  const ozet = crypto.createHash('sha256').update(KOPRU_SURUMU);
   // CR'ler atılır: Windows checkout'u (autocrlf) imzayı değiştirmesin.
   for (const f of yamalar) ozet.update(f).update(fs.readFileSync(path.join(YAMA_DIZINI, f), 'utf8').replace(/\r/g, ''));
   const imza = ozet.digest('hex').slice(0, 16);
   const damga = fs.existsSync(YAMA_DAMGASI) ? fs.readFileSync(YAMA_DAMGASI, 'utf8').trim() : '';
   if (imza === damga && fs.existsSync(SERVIS_BINARY)) return;
+
+  // Önce kaynak sabit sürüme; yamalar o sürüme göre yazılı. Başarısızsa
+  // fırlatır → damga yazılmaz, sonraki açılışta yeniden denenir.
+  await kopruSurumunuSabitle();
 
   for (const f of yamalar) {
     const sonuc = await yamaUygula(path.join(YAMA_DIZINI, f));
@@ -271,6 +339,13 @@ async function servisiBaslatIc(platform, hesap, port) {
   }
 
   const cerezEnv = envDegiskenleri(env);
+  // Güncel köprü yalnız GEMINI_COOKIES (Cookie başlığı) okuyor; eski girişlerin
+  // .env'inde sadece PSID/PSIDTS çifti var → çiftten başlık kur. Yetmezse
+  // model listesi boş kalır ve aşağıdaki "yeniden giriş" hatası düşer; yeni
+  // giriş tam başlığı yazar (cerezleriSenkronla).
+  if (!cerezEnv.GEMINI_COOKIES && cerezEnv.GEMINI_1PSID && cerezEnv.GEMINI_1PSIDTS) {
+    cerezEnv.GEMINI_COOKIES = `__Secure-1PSID=${cerezEnv.GEMINI_1PSID}; __Secure-1PSIDTS=${cerezEnv.GEMINI_1PSIDTS}`;
+  }
   // Teşhis: köprünün OKUDUĞU dosya yolu + enjekte edilen çerez uzunlukları.
   // PSIDTS=0b ise ya dosya boş ya bu yol yazılan dosyadan farklı.
   log.info(
@@ -418,16 +493,39 @@ export async function cerezleriSenkronla(cerezler, platform, hesap) {
     taban = fs.readFileSync(path.join(SERVIS_DIZINI, '.env.example'), 'utf8');
   const korunan = taban
     .split(/\r?\n/)
-    .filter((l) => l.trim() && !/^\s*(PORT|GEMINI_1PSID|GEMINI_1PSIDTS)\s*=/.test(l));
+    .filter((l) => l.trim() && !/^\s*(PORT|GEMINI_1PSID|GEMINI_1PSIDTS|GEMINI_COOKIES)\s*=/.test(l));
+  // Güncel köprü gemini.google.com'a giden TAM Cookie başlığını istiyor
+  // (GEMINI_COOKIES). gemini.google.com'a gönderilen çerezler: .google.com +
+  // gemini.google.com domainleri. Aynı ad iki domainde varsa .google.com'daki
+  // tutulur (PSID çifti zaten oradan seçildi).
+  const simdi = Date.now() / 1000;
+  const baslikHaritasi = new Map();
+  for (const c of cerezler) {
+    if (!c.value || /[;'\r\n]/.test(c.value)) continue;
+    if (c.expires > 0 && c.expires < simdi) continue;
+    if (!['.google.com', 'google.com', 'gemini.google.com', '.gemini.google.com'].includes(c.domain)) continue;
+    if ((c.path || '/') !== '/' ) continue;
+    const genel = c.domain === '.google.com' || c.domain === 'google.com';
+    if (!baslikHaritasi.has(c.name) || genel) baslikHaritasi.set(c.name, c.value);
+  }
+  baslikHaritasi.set('__Secure-1PSID', psid);
+  baslikHaritasi.set('__Secure-1PSIDTS', psidts);
+  const cerezBasligi = [...baslikHaritasi].map(([k, v]) => `${k}=${v}`).join('; ');
   const icerik =
-    [...korunan, `PORT=${port}`, `GEMINI_1PSID=${psid}`, `GEMINI_1PSIDTS=${psidts}`].join('\n') + '\n';
+    [
+      ...korunan,
+      `PORT=${port}`,
+      `GEMINI_1PSID=${psid}`,
+      `GEMINI_1PSIDTS=${psidts}`,
+      `GEMINI_COOKIES='${cerezBasligi}'`,
+    ].join('\n') + '\n';
   fs.writeFileSync(dosya, icerik);
   // Yazdıktan HEMEN sonra geri oku — dosyaya gerçekten değer düştü mü?
   const kontrol = envDegiskenleri(dosya);
   log.ok(
     `[gemini-http] çerezler yazıldı — ${hesap?.ad || 'varsayılan'} ` +
       `(${path.relative(ROOT, dosya)}) [PSID=${(kontrol.GEMINI_1PSID || '').length}b ` +
-      `PSIDTS=${(kontrol.GEMINI_1PSIDTS || '').length}b]`
+      `PSIDTS=${(kontrol.GEMINI_1PSIDTS || '').length}b çerez-başlığı=${baslikHaritasi.size} çerez]`
   );
 
   // Bu hesabın köprüsü çalışıyorsa yeni çerezlerle yeniden doğsun. Windows'ta
@@ -484,6 +582,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
   const uzanti = path.extname(imagePath).toLowerCase();
   const mime = uzanti === '.png' ? 'image/png' : uzanti === '.webp' ? 'image/webp' : 'image/jpeg';
 
+  const model = await modelSec(portu(platform, hesap), platform?.model);
   const yanit = await fetch(`${taban(platform, hesap)}/openai/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -492,7 +591,8 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
       ? AbortSignal.any([signal, AbortSignal.timeout(ayarlar?.generationTimeoutMs || 240000)])
       : AbortSignal.timeout(ayarlar?.generationTimeoutMs || 240000),
     body: JSON.stringify({
-      model: platform?.model || 'gemini-3-pro-image',
+      // undefined → alan gönderilmez, köprü hesabın ilk modelini kullanır.
+      model,
       messages: [
         {
           role: 'user',
@@ -529,7 +629,11 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     // BOŞ model listesi = köprü Gemini oturumuna hiç bağlanamadı (çerez ölmüş).
     // Model adı yanlış olsaydı liste DOLU gelir ("Available models: [gemini-...]")
     // — o kalıcı bir config hatasıdır, failover işe yaramaz, normal hata sayılır.
-    if (/Available models:\s*\[\s*\]/i.test(govde) || /not supported or not available[\s\S]*\[\s*\]/i.test(govde)) {
+    if (
+      /Available models:\s*\[\s*\]/i.test(govde) ||
+      /not supported or not available[\s\S]*\[\s*\]/i.test(govde) ||
+      /no Gemini models available/i.test(govde)
+    ) {
       const e = new Error('Gemini oturumu geçersiz (çerezler ölmüş olabilir) — bu hesaba yeniden giriş gerekebilir.');
       e.limitDolu = true; // aynı failover yolu: bu hesabı dinlenmeye al, ötekine geç
       e.sebep = 'oturum';
@@ -549,7 +653,7 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
     const oz = icerik.replace(/\s+/g, ' ').trim().slice(0, 200);
     if (/!\[[^\]]*\]\(https?:/.test(icerik)) {
       throw new Error(
-        'Köprü görseli indirmeden URL döndürdü (voku yaması uygulanmamış olabilir): tools/gemini-web-to-api.voku.patch'
+        'Köprü görseli indirmeden URL döndürdü (voku yaması uygulanmamış olabilir): patches/gemini-web-to-api.voku.patch'
       );
     }
     throw new Error(`Gemini görsel üretmedi. Yanıt: ${oz || '(boş)'}`);
