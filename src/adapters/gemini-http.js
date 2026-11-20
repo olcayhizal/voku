@@ -48,6 +48,8 @@ const KOPRU_SURUMU = '507f5aa244a421ec2cc10a664f4ec37eb108be54';
 const koprular = new Map();
 // port → köprünün stderr'e yazdığı son "authentication failed: ..." sebebi.
 const sonAuthHatasi = new Map();
+// port → köprünün son stderr satırları (uzaktan teşhis için, kırpılmamış).
+const kopruKaydi = new Map();
 
 /** Bir hesabın portu (tek hesapta baseUrl'den, çokluda hesap.port). */
 function portu(platform, hesap) {
@@ -376,6 +378,9 @@ async function servisiBaslatIc(platform, hesap, port) {
     const metin = String(d);
     const m = metin.match(/authentication failed: ([^"|\r\n]+)/);
     if (m) sonAuthHatasi.set(port, m[1].trim());
+    const kayit = kopruKaydi.get(port) || [];
+    kayit.push(...metin.split(/\r?\n/).filter(Boolean).map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').slice(0, 1500)));
+    kopruKaydi.set(port, kayit.slice(-60));
     log.warn(`[gemini-http:${port}] ${metin.trim().slice(0, 200)}`);
   });
   surec.on('close', () => {
@@ -502,15 +507,15 @@ const profilSiralari = new Map();
  * ham, `=s2048-rj` ve `=s2048` biçimleri sırayla denenir. Dönüş:
  * [{ tur, b64 }] — inemeyen URL atlanır.
  */
-async function tarayicidanIndir(urller, profilDizini) {
+async function tarayicidanIndir(urller, profilDizini, denemeler = null) {
   if (!profilDizini || !fs.existsSync(profilDizini)) throw new Error('hesabın tarayıcı profili yok');
   const onceki = profilSiralari.get(profilDizini) || Promise.resolve();
-  const is = onceki.catch(() => {}).then(() => tarayicidanIndirIc(urller, profilDizini));
+  const is = onceki.catch(() => {}).then(() => tarayicidanIndirIc(urller, profilDizini, denemeler));
   profilSiralari.set(profilDizini, is.catch(() => {}));
   return is;
 }
 
-async function tarayicidanIndirIc(urller, profilDizini) {
+async function tarayicidanIndirIc(urller, profilDizini, denemeler = null) {
   const ctx = await contextAc({ profileDir: profilDizini }, { navigationTimeoutMs: 45000 }, { headless: true });
   const sonuc = [];
   try {
@@ -522,6 +527,7 @@ async function tarayicidanIndirIc(urller, profilDizini) {
         try {
           const yanit = await sayfa.goto(aday, { waitUntil: 'load', timeout: 45000, referer: 'https://gemini.google.com/' });
           const tip = yanit?.headers()['content-type'] || '';
+          denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), durum: yanit?.status(), tip: tip.split(';')[0] });
           if (yanit?.ok() && tip.startsWith('image/')) {
             const tur = tip.includes('png') ? 'png' : tip.includes('webp') ? 'webp' : 'jpeg';
             sonuc.push({ tur, b64: (await yanit.body()).toString('base64') });
@@ -529,6 +535,7 @@ async function tarayicidanIndirIc(urller, profilDizini) {
           }
           log.warn(`[gemini-http] tarayıcı indirme ${yanit?.status()} ${tip.split(';')[0]} — ${urlSekli(aday)}`);
         } catch (e) {
+          denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), hata: String(e.message).split('\n')[0] });
           log.warn(`[gemini-http] tarayıcı indirme hatası — ${urlSekli(aday)}: ${String(e.message).split('\n')[0]}`);
         }
       }
@@ -537,6 +544,107 @@ async function tarayicidanIndirIc(urller, profilDizini) {
     await ctx.close().catch(() => {});
   }
   return sonuc;
+}
+
+/**
+ * Uzaktan teşhis (POST /api/debug/gemini-sina): voku başka PC'de koşarken
+ * "güncelle → dene → ekran görüntüsü" döngüsünü tek çağrıya indirir. Köprüyü
+ * hazırlar, tek bir metinden görsel üretimi dener ve indirmenin her yolunu
+ * (köprü b64, Node fetch + çerez, Chrome profili) ayrı ayrı raporlar.
+ * Bir Gemini üretim hakkı harcar. Çerez/URL değerleri rapora girmez.
+ */
+export async function teshis({ platform, hesap, prompt }) {
+  const rapor = { hesap: hesap?.ad || 'varsayılan', zaman: new Date().toISOString(), adimlar: [] };
+  const adim = (ad, veri) => rapor.adimlar.push({ ad, ...veri });
+  const port = portu(platform, hesap);
+  const env = envYolu(hesap);
+  try {
+    rapor.kopruSurumu = (await gitCikti('rev-parse', '--short', 'HEAD')) || null;
+    rapor.yamaDamgasi = fs.existsSync(YAMA_DAMGASI) ? fs.readFileSync(YAMA_DAMGASI, 'utf8').trim() : null;
+    const cerezEnv = envDegiskenleri(env);
+    rapor.cerez = {
+      dosya: path.basename(env),
+      psid: (cerezEnv.GEMINI_1PSID || '').length,
+      psidts: (cerezEnv.GEMINI_1PSIDTS || '').length,
+      tamBaslikCerezSayisi: cerezEnv.GEMINI_COOKIES ? cerezEnv.GEMINI_COOKIES.split(';').length : 0,
+      cerezAdlari: cerezEnv.GEMINI_COOKIES ? cerezEnv.GEMINI_COOKIES.split(';').map((p) => p.split('=')[0].trim()) : [],
+    };
+    try {
+      await servisiBaslat(platform, hesap);
+      adim('kopru', { ok: true, port });
+    } catch (e) {
+      adim('kopru', { ok: false, hata: e.message });
+      return rapor;
+    }
+    const idler = (await modelListesi(port, 5000)).map((m) => m?.id).filter(Boolean);
+    const model = modelSecListeden(idler, platform?.model);
+    adim('modeller', { idler, secilen: model ?? '(köprü varsayılanı)' });
+
+    const t0 = Date.now();
+    const yanit = await fetch(`http://127.0.0.1:${port}/openai/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: AbortSignal.timeout(240000),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt || 'Generate an image: a single red apple on a white table, photorealistic.' }],
+      }),
+    });
+    const govde = await yanit.text();
+    let icerik = '';
+    try {
+      icerik = JSON.parse(govde).choices?.[0]?.message?.content || '';
+    } catch {
+      /* hata gövdesi */
+    }
+    const dataGorsel = [...icerik.matchAll(/data:image\/([a-z]+);base64,([^)]+)/g)].map((m) => ({ tur: m[1], bayt: Math.floor(m[2].length * 0.75) }));
+    const urller = [...icerik.matchAll(/!\[[^\]]*\]\((https:\/\/[^)\s]+)\)/g)].map((m) => m[1]);
+    adim('uretim', {
+      durum: yanit.status,
+      sureMs: Date.now() - t0,
+      koprudenB64: dataGorsel,
+      urlSekilleri: urller.map(urlSekli),
+      ozet: (icerik || govde).replace(/data:image\/[a-z]+;base64,[^)]+/g, '<b64>').replace(/https:\/\/[^)\s]+/g, (u) => urlSekli(u)).slice(0, 600),
+    });
+
+    if (urller.length) {
+      // Node fetch + aynı çerez başlığı: Go köprüsüyle aynı sonucu veriyorsa
+      // sorun çerez/URL; Chrome başarıyorsa TLS parmak izi / çerez kavanozu.
+      const baslik = cerezEnv.GEMINI_COOKIES ||
+        `__Secure-1PSID=${cerezEnv.GEMINI_1PSID}; __Secure-1PSIDTS=${cerezEnv.GEMINI_1PSIDTS}`;
+      const nodeDenemeleri = [];
+      for (const u of urller.slice(0, 1)) {
+        const tabani = u.replace(/=[swh]\d+[^/?]*$/, '');
+        for (const aday of [...new Set([u, `${tabani}=s2048-rj`, `${tabani}=s2048`, `${tabani}=d`])]) {
+          try {
+            const r = await fetch(aday, {
+              headers: { cookie: baslik, referer: 'https://gemini.google.com/', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' },
+              redirect: 'follow',
+              signal: AbortSignal.timeout(30000),
+            });
+            nodeDenemeleri.push({ url: urlSekli(aday), sonUrl: urlSekli(r.url), durum: r.status, tip: (r.headers.get('content-type') || '').split(';')[0] });
+            await r.arrayBuffer().catch(() => {});
+          } catch (e) {
+            nodeDenemeleri.push({ url: urlSekli(aday), hata: e.message });
+          }
+        }
+      }
+      adim('indir-node', { denemeler: nodeDenemeleri });
+      const denemeler = [];
+      const profil = hesap?.profileDir || platform?.profileDir;
+      try {
+        const inen = await tarayicidanIndir(urller.slice(0, 1), profil, denemeler);
+        adim('indir-chrome', { profil: profil ? path.basename(profil) : null, basarili: inen.length, denemeler });
+      } catch (e) {
+        adim('indir-chrome', { profil: profil ? path.basename(profil) : null, hata: e.message, denemeler });
+      }
+    }
+  } catch (e) {
+    adim('beklenmeyen', { hata: String(e.stack || e.message).slice(0, 800) });
+  } finally {
+    rapor.kopruLogu = (kopruKaydi.get(port) || []).slice(-30).map((l) => l.replace(/https:\/\/[^\s"'\\]+/g, (u) => urlSekli(u)));
+  }
+  return rapor;
 }
 
 /** Tüm köprü süreçlerini kapatır (panel kapanışında). */

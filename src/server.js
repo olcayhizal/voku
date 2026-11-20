@@ -74,6 +74,9 @@ function hesapAnahtar(platformAdi, hesapAd) {
 }
 
 /** Platformun hesabını ad ile bulur; ad yoksa/tek hesapsa ilkini verir. */
+// Ana akışta (güncelleme bekçisi) atanır: uzaktan güncelle + yeniden başlat.
+let uzaktanGuncelle = null;
+
 function hesapBul(platform, hesapAd) {
   const liste = platform.hesaplar || [];
   if (!hesapAd) return liste[0];
@@ -716,6 +719,32 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
     } catch { /* dosya yoksa mesaj kalır */ }
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(metin);
+  }
+
+  // Uzaktan güncelleme: 15 dk bekçisini beklemeden GitHub'dan çek, değiştiyse
+  // panel yeniden başlar. Koşan iş varsa ?zorla=1 olmadan reddedilir.
+  if (yol === '/api/debug/guncelle' && req.method === 'POST') {
+    if (!uzaktanGuncelle) return json(res, 503, { hata: 'Panel henüz hazır değil.' });
+    if (durum.kosanJoblar.size && url.searchParams.get('zorla') !== '1') {
+      return json(res, 409, { hata: `${durum.kosanJoblar.size} iş koşuyor; ?zorla=1 ile yine de güncelle.` });
+    }
+    try {
+      return json(res, 200, await uzaktanGuncelle());
+    } catch (e) {
+      return json(res, 500, { hata: String(e.message || e).split('\n').slice(0, 6).join('\n') });
+    }
+  }
+
+  // Uzaktan Gemini teşhisi: köprü + tek üretim + indirme yollarının karnesi.
+  // ?hesap=<ad> (yoksa ilk hesap). Bir Gemini üretim hakkı harcar.
+  if (yol === '/api/debug/gemini-sina' && req.method === 'POST') {
+    const platform = ayarlar.platforms?.gemini;
+    if (!platform) return json(res, 404, { hata: 'gemini platformu yok.' });
+    const adaptor = adaptorAl(platform.adapter || 'gemini');
+    if (typeof adaptor.teshis !== 'function') return json(res, 400, { hata: `${platform.adapter} sürücüsünde teşhis yok.` });
+    const hesap = hesapBul(platform, url.searchParams.get('hesap')) || null;
+    const govde = await govdeOku(req).catch(() => ({}));
+    return json(res, 200, await adaptor.teshis({ platform, hesap, prompt: govde?.prompt }));
   }
 
   // Disk: profil boyutları + son Codex temizliğinin karnesi. POST elle
@@ -1412,6 +1441,12 @@ export function paneliBaslat({ port = 4173, ayarlarDosyasi, ac = false, telegram
     }
   }, guncellemeAralik);
   guncellemeBekcisi.unref?.();
+  uzaktanGuncelle = async () => {
+    const sonuc = await guncelle();
+    log.info(`Uzaktan güncelleme: ${sonuc.degisti ? 'yeni sürüm alındı, yeniden başlıyor' : 'zaten güncel'}`);
+    if (sonuc.degisti) setTimeout(() => yenidenBaslat().catch((e) => log.err(`yeniden başlatma: ${e.message}`)), 1500);
+    return { ...sonuc, surum: await yerelSurum() };
+  };
 
   // --- Limit bekçisi ---
   // Tüm hesapları limitte olduğu için pending kalan işler, reset saati gelince
