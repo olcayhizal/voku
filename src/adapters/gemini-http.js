@@ -23,6 +23,7 @@ import { ROOT } from '../paths.js';
 import { calistirilabilir, komutYolu, portTutaniOldur } from '../platform.js';
 import { log } from '../logger.js';
 import { contextAc } from '../browser.js';
+import sharp from 'sharp';
 
 const calistir = promisify(execFile);
 
@@ -522,7 +523,10 @@ async function tarayicidanIndirIc(urller, profilDizini, denemeler = null) {
     const sayfa = await ctx.newPage();
     for (const u of urller) {
       const tabani = u.replace(/=[swh]\d+[^/?]*$/, '');
-      const adaylar = [...new Set([u, `${tabani}=s2048-rj`, `${tabani}=s2048`, `${tabani}=d`])];
+      // Sıra önemli: ham gg-dl adresi =s512 ÖNİZLEMEYE yönleniyor (canlı
+      // teşhis 20 Kas) — baskı 899×1181 ister. Önce asıl boyut (=d → s0-d),
+      // sonra 2048, ham en son.
+      const adaylar = [...new Set([`${tabani}=d`, `${tabani}=s2048`, `${tabani}=s2048-rj`, u])];
       for (const aday of adaylar) {
         try {
           const yanit = await sayfa.goto(aday, { waitUntil: 'load', timeout: 45000, referer: 'https://gemini.google.com/' });
@@ -530,7 +534,11 @@ async function tarayicidanIndirIc(urller, profilDizini, denemeler = null) {
           denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), durum: yanit?.status(), tip: tip.split(';')[0] });
           if (yanit?.ok() && tip.startsWith('image/')) {
             const tur = tip.includes('png') ? 'png' : tip.includes('webp') ? 'webp' : 'jpeg';
-            sonuc.push({ tur, b64: (await yanit.body()).toString('base64') });
+            const govde = await yanit.body();
+            const boyut = await sharp(govde).metadata().then((m) => `${m.width}×${m.height}`).catch(() => '?');
+            denemeler?.push({ yol: 'chrome-profil', url: urlSekli(aday), boyut, bayt: govde.length });
+            log.info(`[gemini-http] tarayıcıdan indirildi ${boyut} (${Math.round(govde.length / 1024)} KB) — ${urlSekli(aday)}`);
+            sonuc.push({ tur, b64: govde.toString('base64') });
             break;
           }
           log.warn(`[gemini-http] tarayıcı indirme ${yanit?.status()} ${tip.split(';')[0]} — ${urlSekli(aday)}`);
