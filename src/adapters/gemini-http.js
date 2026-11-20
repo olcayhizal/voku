@@ -452,6 +452,11 @@ async function profildenTamCerez(envDosyasi, cerezEnv, profilDizini) {
   if (cerezEnv.GEMINI_COOKIES || !cerezEnv.GEMINI_1PSID || !cerezEnv.GEMINI_1PSIDTS) return;
   if (!profilDizini || !fs.existsSync(profilDizini)) return;
   let ctx;
+  // Görsel indirme yedeğiyle aynı profili kapışmasın: aynı sıraya gir.
+  const onceki = profilSiralari.get(profilDizini) || Promise.resolve();
+  let birak;
+  profilSiralari.set(profilDizini, new Promise((r) => (birak = r)));
+  await onceki.catch(() => {});
   try {
     ctx = await contextAc({ profileDir: profilDizini }, { navigationTimeoutMs: 30000 }, { headless: true });
     const cerezler = await ctx.cookies('https://gemini.google.com');
@@ -471,7 +476,67 @@ async function profildenTamCerez(envDosyasi, cerezEnv, profilDizini) {
     log.warn(`[gemini-http] profilden çerez okunamadı (${path.basename(profilDizini)}): ${String(e.message).split('\n')[0]}`);
   } finally {
     await ctx?.close().catch(() => {});
+    birak();
   }
+}
+
+/** Teşhis için URL'nin gizli olmayan şekli: host + ilk yol parçası + son ek. */
+function urlSekli(u) {
+  try {
+    const x = new URL(u);
+    const parca = x.pathname.split('/').filter(Boolean);
+    const son = parca.at(-1) || '';
+    const ek = son.includes('=') ? son.slice(son.lastIndexOf('=')) : '';
+    return `${x.host}/${(parca[0] || '').slice(0, 12)}/…${ek}${x.search ? ' ?' : ''}`;
+  } catch {
+    return '(geçersiz url)';
+  }
+}
+
+// Aynı profili iki Chrome açamaz (kilit) — profil başına sıra.
+const profilSiralari = new Map();
+
+/**
+ * Üretilen görselleri hesabın Chrome profiliyle indirir (başsız, gerçek
+ * Chrome → tarayıcı TLS'i + profilin tüm Google çerezleri). Her URL için
+ * ham, `=s2048-rj` ve `=s2048` biçimleri sırayla denenir. Dönüş:
+ * [{ tur, b64 }] — inemeyen URL atlanır.
+ */
+async function tarayicidanIndir(urller, profilDizini) {
+  if (!profilDizini || !fs.existsSync(profilDizini)) throw new Error('hesabın tarayıcı profili yok');
+  const onceki = profilSiralari.get(profilDizini) || Promise.resolve();
+  const is = onceki.catch(() => {}).then(() => tarayicidanIndirIc(urller, profilDizini));
+  profilSiralari.set(profilDizini, is.catch(() => {}));
+  return is;
+}
+
+async function tarayicidanIndirIc(urller, profilDizini) {
+  const ctx = await contextAc({ profileDir: profilDizini }, { navigationTimeoutMs: 45000 }, { headless: true });
+  const sonuc = [];
+  try {
+    const sayfa = await ctx.newPage();
+    for (const u of urller) {
+      const tabani = u.replace(/=[swh]\d+[^/?]*$/, '');
+      const adaylar = [...new Set([u, `${tabani}=s2048-rj`, `${tabani}=s2048`, `${tabani}=d`])];
+      for (const aday of adaylar) {
+        try {
+          const yanit = await sayfa.goto(aday, { waitUntil: 'load', timeout: 45000, referer: 'https://gemini.google.com/' });
+          const tip = yanit?.headers()['content-type'] || '';
+          if (yanit?.ok() && tip.startsWith('image/')) {
+            const tur = tip.includes('png') ? 'png' : tip.includes('webp') ? 'webp' : 'jpeg';
+            sonuc.push({ tur, b64: (await yanit.body()).toString('base64') });
+            break;
+          }
+          log.warn(`[gemini-http] tarayıcı indirme ${yanit?.status()} ${tip.split(';')[0]} — ${urlSekli(aday)}`);
+        } catch (e) {
+          log.warn(`[gemini-http] tarayıcı indirme hatası — ${urlSekli(aday)}: ${String(e.message).split('\n')[0]}`);
+        }
+      }
+    }
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+  return sonuc;
 }
 
 /** Tüm köprü süreçlerini kapatır (panel kapanışında). */
@@ -688,24 +753,41 @@ export async function uret(_page, { imagePath, prompt, outDir, baseName, ayarlar
 
   const veri = await yanit.json();
   const icerik = veri.choices?.[0]?.message?.content || '';
-  const gorseller = [...icerik.matchAll(/!\[[^\]]*\]\(data:image\/([a-z]+);base64,([^)]+)\)/g)];
+  let gorseller = [...icerik.matchAll(/!\[[^\]]*\]\(data:image\/([a-z]+);base64,([^)]+)\)/g)];
 
   if (!gorseller.length) {
     // Görsel yerine metin döndüyse sebebi taşı — sessizce "başarısız" deme.
     const oz = icerik.replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (/!\[[^\]]*\]\(https?:/.test(icerik)) {
-      // Görsel ÜRETİLDİ ama köprü indiremedi (lh3 → 403). Kasım 2026'da
-      // görüldü: çerez setinde yalnız PSID çifti varken. Aynı hesapta tekrar
-      // denemek kota yakar → hesabı dinlendir, havuz ötekine / fal'a geçsin.
-      const e = new Error(
-        `Gemini görseli üretti ama indirilemedi (Google 403). "${hesap?.ad || 'Gemini'}" hesabına panelden yeniden giriş yap — tam çerez gerekiyor.`
-      );
-      e.limitDolu = true;
-      e.sebep = 'oturum';
-      e.resetsAt = Date.now() + 30 * 60 * 1000;
-      throw e;
+    const urller = [...icerik.matchAll(/!\[[^\]]*\]\((https:\/\/[^)\s]+)\)/g)].map((m) => m[1]);
+    if (urller.length) {
+      // Görsel ÜRETİLDİ ama köprü indiremedi (lh3 → 403, Kasım 2026). Köprü
+      // Go HTTP istemcisiyle indiriyor; çerez seti / TLS parmak izi / URL
+      // eki adayları. Yedek: hesabın Chrome profili başsız açılır ve görsel
+      // GERÇEK Chrome ile (profilin tüm çerezleri) çekilir.
+      const profil = hesap?.profileDir || platform?.profileDir;
+      const sekil = urller.map(urlSekli).join(' | ');
+      const inen = await tarayicidanIndir(urller, profil).catch((e) => {
+        log.warn(`[gemini-http] tarayıcı yedeği başarısız: ${String(e.message).split('\n')[0]}`);
+        return [];
+      });
+      if (inen.length) {
+        log.ok(`[gemini-http] görsel tarayıcıdan indirildi (${inen.length}) — köprü indiremedi: ${sekil}`);
+        gorseller = inen.map((g) => [null, g.tur, g.b64]);
+      } else {
+        // Aynı hesapta tekrar denemek kota yakar → hesabı dinlendir, havuz
+        // ötekine / fal'a geçsin.
+        log.warn(`[gemini-http] indirilemeyen görsel URL'leri: ${sekil}`);
+        const e = new Error(
+          `Gemini görseli üretti ama indirilemedi (Google 403). "${hesap?.ad || 'Gemini'}" hesabına panelden yeniden giriş yapmayı dene.`
+        );
+        e.limitDolu = true;
+        e.sebep = 'oturum';
+        e.resetsAt = Date.now() + 30 * 60 * 1000;
+        throw e;
+      }
+    } else {
+      throw new Error(`Gemini görsel üretmedi. Yanıt: ${oz || '(boş)'}`);
     }
-    throw new Error(`Gemini görsel üretmedi. Yanıt: ${oz || '(boş)'}`);
   }
 
   const dosyalar = [];
