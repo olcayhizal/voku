@@ -1,0 +1,24 @@
+diff --git a/internal/modules/providers/gemini_service.go b/internal/modules/providers/gemini_service.go
+--- a/internal/modules/providers/gemini_service.go
++++ b/internal/modules/providers/gemini_service.go
+@@ -525,8 +525,19 @@
+ 		language = "en"
+ 	}
+ 
++	// [voku yaması] Model listesi gemini.google.com sayfasından regex ile
++	// kazınıyor; Kasım 2026'da sayfada yalnız "gemini-3.8-live" kaldı ve
++	// gemini-3-pro-image istekleri reddedilmeye başladı. Bu sürüm modeli
++	// gerçekte seçmiyor (ad yalnız inner[3]'e yazılıyor), yani liste bir
++	// kapıdan ibaret. Liste DOLUYSA (oturum sağlam) istenen adla devam edilir;
++	// istek gövdesi önceki çalışan halle aynı kalır. Liste BOŞSA hata korunur:
++	// voku "Available models: []" metninden ölü çerezi tanıyor.
+ 	if !found && requestedModel != "" {
+-		return nil, fmt.Errorf("model '%s' is not supported or not available. Available models: %v", requestedModel, c.ListModelsIDs())
++		if len(c.ListModelsIDs()) == 0 {
++			return nil, fmt.Errorf("model '%s' is not supported or not available. Available models: %v", requestedModel, c.ListModelsIDs())
++		}
++		c.log.Warn("Requested model not in scraped list, continuing with it [voku]", zap.String("model", requestedModel), zap.Strings("available", c.ListModelsIDs()))
++		config.Model = requestedModel
+ 	}
+ 
+ 	if at == "" {
