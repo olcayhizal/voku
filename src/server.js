@@ -74,6 +74,14 @@ function hesapAnahtar(platformAdi, hesapAd) {
 }
 
 /** Platformun hesabını ad ile bulur; ad yoksa/tek hesapsa ilkini verir. */
+/** Teslim edilmiş Telegram işinin kilidini açar (gidenler korunur). Açtıysa true. */
+function teslimKilidiniAc(job) {
+  const kb = job.kaynakBilgi;
+  if (job.kaynak !== 'telegram' || !kb?.teslimAt || !kb.teslimGidenler?.length) return false;
+  job.kaynakBilgi = { ...kb, teslimAt: null, teslimDeneme: 0, teslimSonrakiDeneme: null, teslimSonHata: null };
+  return true;
+}
+
 // Ana akışta (güncelleme bekçisi) atanır: uzaktan güncelle + yeniden başlat.
 let uzaktanGuncelle = null;
 
@@ -1082,6 +1090,16 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
       return json(res, 200, { ok: true });
     }
 
+    // Biten Telegram işinin gitmemiş karelerini gönder (ör. sonradan yeniden
+    // üretilen Gemini kareleri). Gidenler listesi yoksa reddedilir — tümü
+    // ikinci kez gitmesin.
+    if (eylem === 'teslim' && req.method === 'POST') {
+      if (job.kaynak !== 'telegram') return json(res, 400, { hata: 'Telegram işi değil.' });
+      if (!teslimKilidiniAc(job)) return json(res, 409, { hata: 'Gidenler listesi yok ya da iş zaten teslim sırasında.' });
+      jobYaz(job); // 'job' olayı → bot teslimeHazir görür, kalanları yollar
+      return json(res, 200, jobOzet(job));
+    }
+
     if (eylem === 'stop' && req.method === 'POST') {
       try {
         return json(res, 200, jobuDurdur(job.id));
@@ -1109,6 +1127,10 @@ async function apiIstek(req, res, url, ayarlar, erisim = null) {
         t.error = null;
         sayac++;
       }
+      // Telegram işi daha önce teslim edildiyse yeni kareler sohbete gitmezdi
+      // (teslimAt kilidi). Gidenler listesi varken kilit açılır: iş bitince
+      // yalnız GİTMEYEN kareler gönderilir.
+      if (sayac) teslimKilidiniAc(job);
       job.status = durumuHesapla(job);
       jobYaz(job);
       manifestYaz(job);
